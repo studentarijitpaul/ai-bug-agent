@@ -1,0 +1,8 @@
+{
+  "repositories": [
+    "owner/repository"
+  ],
+  "issues_per_repository": 30,
+  "include_pull_requests": false,
+  "request_timeout_seconds": 15
+}

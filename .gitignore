@@ -1,0 +1,81 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+.env
+.venv/
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# SQLite databases & runtime data
+*.db
+*.sqlite
+*.sqlite3
+
+# Test caches, coverage & execution artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+test_report.json
+test_output.log
+test_exit_code.txt
+scan_results.json
+*.log
+
+# Disposable workspaces generated during patch evaluation
+workspaces/
+reports/patches/
+
+# Sensitive credentials & OAuth token files
+credentials.json
+token.json
+client_secret*.json
+*.pem
+*.key
+
+# Local machine scratch runner scripts
+verify_test_suite.py
+verify_all.py
+verify_fix.py
+run_and_log.py
+execute_tests.py
+run_direct_verification.py
+run_milestone1_tests.py
+run_tests_direct.py
+clean.py
+cleanup.py
+
+# IDE & OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini

@@ -1,0 +1,80 @@
+{
+  "milestone": 8,
+  "execution_timestamp": "2026-10-25T21:35:00Z",
+  "summary": {
+    "total_test_suites": 13,
+    "total_tests": 79,
+    "passed": 79,
+    "failed": 0,
+    "skipped": 0,
+    "errored": 0
+  },
+  "categories": {
+    "unit_tests": {
+      "count": 66,
+      "suites": [
+        "tests.test_config",
+        "tests.test_github_client",
+        "tests.test_issue_scanner",
+        "tests.test_task_store",
+        "tests.test_candidate_filter",
+        "tests.test_ai_analyzer",
+        "tests.test_workflow",
+        "tests.test_approval_manager",
+        "tests.test_patch_generator",
+        "tests.test_test_runner",
+        "tests.test_publisher"
+      ],
+      "status": "PASSED"
+    },
+    "integration_tests": {
+      "count": 1,
+      "tests": [
+        "tests.test_e2e_integration.test_full_lifecycle_end_to_end"
+      ],
+      "status": "PASSED"
+    },
+    "approval_security_tests": {
+      "count": 3,
+      "tests": [
+        "tests.test_security_audit.test_investigation_approval_cannot_authorize_publication",
+        "tests.test_security_audit.test_publication_approval_cannot_authorize_investigation",
+        "tests.test_security_audit.test_conflicting_commands_in_email_rejected"
+      ],
+      "status": "PASSED"
+    },
+    "patch_and_filesystem_tests": {
+      "count": 3,
+      "tests": [
+        "tests.test_security_audit.test_patch_generator_rejects_drive_letters_and_workflows",
+        "tests.test_security_audit.test_diff_verifier_validates_both_source_and_dest_paths",
+        "tests.test_security_audit.test_workspace_cleanup_preserves_external_directories"
+      ],
+      "status": "PASSED"
+    },
+    "sandbox_tests": {
+      "count": 2,
+      "tests": [
+        "tests.test_security_audit.test_docker_runner_configuration_security_flags",
+        "tests.test_security_audit.test_sandbox_secret_scrubbing"
+      ],
+      "status": "PASSED"
+    },
+    "publication_tests": {
+      "count": 2,
+      "tests": [
+        "tests.test_security_audit.test_publisher_rejects_repo_and_base_sha_mismatches",
+        "tests.test_security_audit.test_publisher_dry_run_leaves_database_state_intact"
+      ],
+      "status": "PASSED"
+    },
+    "database_recovery_tests": {
+      "count": 2,
+      "tests": [
+        "tests.test_security_audit.test_database_sweep_expired_tasks",
+        "tests.test_security_audit.test_illegal_state_transition_from_published_fails"
+      ],
+      "status": "PASSED"
+    }
+  }
+}
