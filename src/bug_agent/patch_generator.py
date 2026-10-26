@@ -13,6 +13,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 
 from bug_agent.ai_analyzer import AIProviderBase, AIProviderError, AnalysisResult, MockAIProvider
 from bug_agent.config import AppConfig
+from bug_agent.github_client import GitHubClient
 from bug_agent.models import ApprovalStatus, Task, TaskStatus
 from bug_agent.task_store import TaskStore
 
@@ -162,6 +163,7 @@ class PatchGenerator:
         self.config = config or AppConfig.load()
         self.ai_provider = ai_provider or MockAIProvider()
         self.workspace_mgr = workspace_manager or WorkspaceManager()
+        self.github_client = GitHubClient(token=self.config.github_token, timeout=self.config.request_timeout_seconds)
 
     def generate_patch_for_task(
         self,
@@ -197,8 +199,10 @@ class PatchGenerator:
         except Exception as e:
             return False, None, f"Failed parsing stored analysis_result for task '{task_id}': {e}"
 
-        # 5. Determine base commit SHA (use recorded base_commit_sha or mock default for simulation)
-        base_commit_sha = task.base_commit_sha or "0123456789abcdef0123456789abcdef01234567"
+        # 5. Determine a real repository revision. Never synthesize source files or SHAs.
+        base_commit_sha = task.base_commit_sha
+        if not base_commit_sha:
+            return False, None, "Task has no recorded base commit SHA; refusing to generate a patch against a moving branch."
 
         # 6. Create disposable workspace
         workspace = self.workspace_mgr.create_workspace(prefix=f"patch_{task_id}_")
@@ -206,7 +210,7 @@ class PatchGenerator:
             # Collect target files from analysis
             target_files = [f.path for f in analysis.relevant_files if f.path]
             if not target_files:
-                target_files = ["src/component.py"]  # Fallback default target file
+                return False, None, "Analysis did not identify source files; refusing to invent a patch target."
 
             if len(target_files) > MAX_MODIFIED_FILES:
                 return False, None, f"Too many target files requested ({len(target_files)} > {MAX_MODIFIED_FILES})."
@@ -214,9 +218,11 @@ class PatchGenerator:
             original_contents: Dict[str, str] = {}
             for rel_path in target_files:
                 target_file_path = self.workspace_mgr.validate_file_path(workspace, rel_path)
-                # Seed with original file content from analysis snippet or dummy starter code
-                snippet = next((f.snippet for f in analysis.relevant_files if f.path == rel_path), "")
-                starter_code = snippet or "# Original module code\ndef execute():\n    return True\n"
+                starter_code = self.github_client.get_file_content(
+                    repository=task.repository, path=rel_path, ref=base_commit_sha
+                )
+                if starter_code is None:
+                    return False, None, f"Could not retrieve original repository file '{rel_path}' at the recorded revision."
                 target_file_path.parent.mkdir(parents=True, exist_ok=True)
                 target_file_path.write_text(starter_code, encoding="utf-8")
                 original_contents[rel_path] = starter_code
@@ -236,6 +242,8 @@ class PatchGenerator:
 
             if not edits:
                 return False, None, "AI provider proposed an empty edit set."
+            if len(edits) > MAX_MODIFIED_FILES or not set(edits).issubset(original_contents):
+                return False, None, "AI provider proposed files outside the reviewed source file set."
 
             # 8. Validate and apply edits into disposable workspace
             modified_contents: Dict[str, str] = {}

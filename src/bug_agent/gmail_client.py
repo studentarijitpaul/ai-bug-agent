@@ -115,10 +115,14 @@ class GmailClient(GmailClientBase):
         credentials_file: str = "credentials.json",
         token_file: str = "token.json",
         scopes: Optional[List[str]] = None,
+        credentials_json: Optional[str] = None,
+        token_json: Optional[str] = None,
     ):
         self.credentials_file = credentials_file
         self.token_file = token_file
         self.scopes = scopes or GMAIL_SCOPES
+        self.credentials_json = credentials_json or os.environ.get("GMAIL_CREDENTIALS_JSON")
+        self.token_json = token_json or os.environ.get("GMAIL_TOKEN_JSON")
         self._service = None
 
     def _get_service(self):
@@ -129,7 +133,6 @@ class GmailClient(GmailClientBase):
         try:
             from google.auth.transport.requests import Request
             from google.oauth2.credentials import Credentials
-            from google_auth_oauthlib.flow import InstalledAppFlow
             from googleapiclient.discovery import build
         except ImportError:
             raise GmailError(
@@ -137,7 +140,19 @@ class GmailClient(GmailClientBase):
             )
 
         creds = None
-        if os.path.exists(self.token_file):
+        if self.token_json:
+            try:
+                token_info = json.loads(self.token_json)
+                if self.credentials_json:
+                    client_info = json.loads(self.credentials_json)
+                    client_info = client_info.get("installed", client_info.get("web", client_info))
+                    token_info.setdefault("client_id", client_info.get("client_id"))
+                    token_info.setdefault("client_secret", client_info.get("client_secret"))
+                    token_info.setdefault("token_uri", client_info.get("token_uri", "https://oauth2.googleapis.com/token"))
+                creds = Credentials.from_authorized_user_info(token_info, self.scopes)
+            except Exception as e:
+                raise GmailAuthError(f"GMAIL_TOKEN_JSON is invalid: {type(e).__name__}") from None
+        elif os.path.exists(self.token_file):
             try:
                 creds = Credentials.from_authorized_user_file(self.token_file, self.scopes)
             except Exception as e:
@@ -151,24 +166,18 @@ class GmailClient(GmailClientBase):
                 except Exception as e:
                     raise GmailAuthError(f"Failed to refresh OAuth token: {e}")
             else:
-                if not os.path.exists(self.credentials_file):
-                    raise GmailAuthError(
-                        f"OAuth credentials file '{self.credentials_file}' not found.\n"
-                        "Please download client_secret from Google Cloud Console and save as credentials.json."
-                    )
-                try:
-                    flow = InstalledAppFlow.from_client_secrets_file(self.credentials_file, self.scopes)
-                    creds = flow.run_local_server(port=0)
-                except Exception as e:
-                    raise GmailAuthError(f"OAuth authorization flow failed: {e}")
+                raise GmailAuthError(
+                    "No valid Gmail refresh token is available. Interactive OAuth is disabled; "
+                    "supply GMAIL_TOKEN_JSON with an authorized-user OAuth JSON containing a refresh_token."
+                )
 
             # Store credentials securely
             try:
                 Path(self.token_file).parent.mkdir(parents=True, exist_ok=True)
                 with open(self.token_file, "w", encoding="utf-8") as token_out:
                     token_out.write(creds.to_json())
-            except Exception as e:
-                logger.error(f"Failed saving token file {self.token_file}: {e}")
+            except Exception:
+                logger.error("Failed saving refreshed Gmail OAuth credentials.")
 
         try:
             self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)

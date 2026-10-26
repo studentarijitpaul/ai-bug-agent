@@ -1,5 +1,25 @@
 # HANDOFF.md
 
+## Codex Migration Update (2026-10-26)
+
+- Added `CodexAdapter` using the OpenAI Responses API and configurable GPT-6 Astra default; CLI selection is now `mock` or `codex` and no longer invokes Copilot. This adapter calls the model API and is not the hosted Codex agent harness.
+- The Codex provider requires `OPENAI_API_KEY` and API billing separate from ChatGPT subscriptions. API execution was not attempted in this environment.
+- Added a manual GitHub Actions workflow for read-only scanning and offline mock analysis, with minimal permissions, bounded input, concurrency, timeout, and SHA-pinned checkout/setup actions.
+- Codex execution in hosted Actions is intentionally not enabled. The automatic approval reviewer rejected a workflow transmitting issue and source context to `api.openai.com` because the external destination/data authorization was not verified. Do not add that data path without resolving that approval.
+- Gmail no longer attempts browser OAuth on a hosted runner. Existing refresh tokens can be supplied as `GMAIL_TOKEN_JSON`; optional OAuth client JSON is `GMAIL_CREDENTIALS_JSON`. Duplicate approval requests are skipped when a request record already exists.
+- Patch generation now refuses missing base revisions/source files and does not invent a placeholder file or SHA. Durable cross-run state is not implemented; the hosted workflow database is temporary, and approval/patch/publication stages are excluded.
+- Verification: `python -m pytest -q` via the bundled Python 3.12 runtime passed (84 passed); `git diff --check` passed. The default local Python shim and `.venv` interpreter are broken, so the suite used bundled Python with existing `.venv` site packages and a workspace temp directory.
+- Remaining: resolve the external data approval for official `openai/codex-action` execution, configure a durable database, then wire hosted Gmail approval and later patch/test/publication stages after establishing persistent state. Add dedicated adapter/Gmail regression tests.
+
+### Files changed in this update
+- `.github/workflows/bug-agent.yml`
+- `src/bug_agent/codex_adapter.py`
+- `src/bug_agent/cli.py`, `src/bug_agent/config.py`, `src/bug_agent/workflow.py`, `src/bug_agent/github_client.py`, `src/bug_agent/issue_scanner.py`, `src/bug_agent/task_store.py`
+- `src/bug_agent/gmail_client.py`, `src/bug_agent/approval_manager.py`
+- `src/bug_agent/patch_generator.py`
+- `tests/test_patch_generator.py`, `tests/test_e2e_integration.py`
+- `README.md`, `HANDOFF.md`
+
 ## Current Implementation Status
 - **Current Milestone**: Final Release Preparation Complete (Packaging, Security Hardening, CI, and Documentation).
 - **Active Repository Target**: `pytorch/ignite` (configurable via `repos.json` / `repos.example.json`).

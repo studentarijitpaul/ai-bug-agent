@@ -7,7 +7,6 @@ from typing import Dict, List, Optional
 
 from bug_agent.ai_analyzer import AIProviderBase, AIProviderError, AnalysisResult, MockAIProvider
 from bug_agent.config import AppConfig
-from bug_agent.copilot_adapter import CopilotAdapter
 from bug_agent.github_client import GitHubClient
 from bug_agent.models import Task, TaskStatus
 from bug_agent.task_store import TaskStore

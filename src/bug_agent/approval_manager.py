@@ -147,6 +147,11 @@ This approval request will expire on: {expires_at}
             logger.info(f"Task {task.task_id} is in status {task.status.value}, skipping approval request.")
             return None
 
+        existing_request = self.task_store.get_approval_request(task.task_id)
+        if existing_request is not None:
+            logger.info("Approval request already exists for %s; skipping duplicate email.", task.task_id)
+            return existing_request
+
         if not self.config.approver_email:
             logger.error("Cannot request approval: APPROVER_EMAIL is not configured.")
             return None
@@ -202,6 +207,10 @@ This approval request will expire on: {expires_at}
 
         if task.status != TaskStatus.TESTED:
             logger.info(f"Task {task.task_id} is in status {task.status.value}, skipping publication approval (expected TESTED).")
+            return False
+
+        if self.task_store.get_publication_record(task.task_id) is not None:
+            logger.info("Publication approval request already exists for %s; skipping duplicate email.", task.task_id)
             return False
 
         if not self.config.approver_email:

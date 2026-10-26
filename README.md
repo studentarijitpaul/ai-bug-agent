@@ -48,7 +48,7 @@ github_agent/
 │   ├── candidate_filter.py  # Bug candidate filtering, bot rejection & deduplication
 │   ├── cli.py               # Command-line interface
 │   ├── config.py            # Runtime configuration parsing and validation
-│   ├── copilot_adapter.py   # GitHub Copilot CLI adapter & availability probe
+│   ├── codex_adapter.py     # OpenAI Responses API provider using a Codex model
 │   ├── github_client.py     # Resilient, read-only GitHub REST API client
 │   ├── gmail_client.py      # Gmail REST API client (least privilege) & mock client
 │   ├── issue_scanner.py     # Multi-repository scanner with stage diagnostics
@@ -132,7 +132,7 @@ Key variables:
 
 ## 5. Verification & Test Suite Execution
 
-The test suite requires **no external credentials, no GitHub tokens, no live Gmail OAuth, and no Copilot subscription**. All network calls are mocked.
+The test suite requires **no external credentials, no GitHub tokens, no live Gmail OAuth, and no OpenAI API key**. All network calls are mocked.
 
 Run using pytest:
 ```powershell
@@ -235,15 +235,11 @@ python -m bug_agent.cli --publish TASK-owner-repo-123 --dry-run
 - Fully functional, offline, deterministic, and bundled by default.
 - Implements simulated timeouts, format errors, and API failures for robust error recovery testing.
 
-### GitHub Copilot CLI Adapter (`copilot_adapter.py`)
-- **Status: Unverified on this host / Requires local setup**.
-- Standard GitHub Student and Individual subscriptions do not provide direct OpenAI-style API endpoints. Copilot programmatic access requires an authenticated GitHub Copilot CLI session.
-- **Requirements**:
-  1. Install GitHub CLI (`gh`) or Node.js / npm.
-  2. Install Copilot extension: `gh extension install github/gh-copilot` (or `npm install -g @github/copilot-cli`).
-  3. Authenticate interactively: `gh auth login --web` or `copilot auth login`.
-  4. Ensure the binary is accessible on `PATH` or specify `COPILOT_CLI_PATH`.
-- The adapter performs a live execution probe (`copilot --version`); if the CLI is absent or a non-functional shim is encountered, it raises a clear error with setup guidance rather than failing silently.
+### OpenAI Codex provider (`codex_adapter.py`)
+
+Select `--ai-provider codex` to use the OpenAI Responses API with the configured GPT-6 Astra model. Set `OPENAI_API_KEY` in the process environment; the key is never logged. API use requires an OpenAI API key and billing/credits configured separately from any ChatGPT subscription. The provider validates JSON results and has a request timeout. `--ai-provider mock` remains available offline. This adapter performs model inference; it is distinct from the hosted Codex agent harness.
+
+The GitHub-hosted workflow at `.github/workflows/bug-agent.yml` is manually triggered, read-only, and runs the existing CLI with offline mock analysis. Hosted Codex analysis is not enabled because repository issue/source context would be transmitted to `api.openai.com`; the automatic approval reviewer rejected that workflow until the external destination and data authorization are verified. The official [Codex GitHub Action](https://github.com/openai/codex-action) is the supported hosted Codex execution integration and requires `OPENAI_API_KEY` as a GitHub Actions secret.
 
 ---
 
@@ -256,8 +252,11 @@ When transitioning from `--mock-gmail` to production Gmail:
 4. The agent requests **least-privilege scopes**:
    - `https://www.googleapis.com/auth/gmail.send` (send approval requests only)
    - `https://www.googleapis.com/auth/gmail.readonly` (poll incoming decision replies only)
-5. On first live run, an interactive browser authorization will generate `token.json`.
-6. **Security Standard**: `credentials.json` and `token.json` are excluded in `.gitignore` and must never be committed.
+5. Complete OAuth authorization on a trusted local machine once, with the two scopes above, then securely store the resulting authorized-user token JSON (including `refresh_token`) as the `GMAIL_TOKEN_JSON` Actions secret. The secret value is the complete JSON object, not a path. Optionally provide OAuth client JSON in `GMAIL_CREDENTIALS_JSON`; no browser flow is attempted by the application.
+6. On a hosted runner, add `GMAIL_TOKEN_JSON`, `GMAIL_CREDENTIALS_JSON` (if needed), and `APPROVER_EMAIL` as repository or environment secrets/variables. Never echo these values or upload them as artifacts. Keep local `credentials.json` and `token.json` excluded from version control.
+7. Google OAuth consent in **Testing** mode limits refresh-token lifetime (commonly seven days for non-basic scopes) and eligible test users; promote/configure the consent screen as appropriate for durable use. Revocation, expiry, or policy changes cause the workflow to fail closed and require reauthorization.
+
+Live approval email commands remain separate: `APPROVE TASK-…` authorizes patch work, while `APPROVE PUBLISH TASK-…` authorizes draft PR publication. Gmail operations are explicit CLI stages and are not part of the initial hosted workflow.
 
 ---
 
@@ -285,7 +284,8 @@ When transitioning from `--mock-gmail` to production Gmail:
 ## 10. Known Limitations
 
 - **Container Runtime**: Full sandboxed test execution requires a local Docker daemon. Systems without Docker must use `--mock-sandbox` or tests transition to `NEEDS_REVIEW`.
-- **Copilot CLI Automation**: Programmatic batch generation without an interactive terminal depends on the installed Copilot CLI version supporting non-interactive mode.
+- **Hosted state**: GitHub-hosted runners are ephemeral. The workflow stores SQLite under the runner's temporary directory, so deduplication, approvals, and audit history do not persist between runs. Do not use hosted approval, patch, or publication stages until durable external storage is implemented and configured.
+- **Patch target revision**: Patch generation requires a recorded base commit SHA and fetchable original source files. It fails closed if either is unavailable and never synthesizes a fake source file.
 - **Network Boundaries**: In Docker test mode, `--network none` prevents dependency downloads during test execution; dependencies must be pre-installed in the container base image.
 
 ---

@@ -38,7 +38,10 @@ def test_full_lifecycle_end_to_end(tmp_path: Path):
     )
 
     mock_github = MagicMock(spec=GitHubClient)
-    mock_github.check_repository_access.return_value = {"id": 1, "full_name": "pytorch/ignite"}
+    mock_github.check_repository_access.return_value = {
+        "id": 1, "full_name": "pytorch/ignite", "default_branch": "main"
+    }
+    mock_github.get_branch_sha.return_value = "a" * 40
     mock_github.get_file_content.return_value = "def train():\n    return 42\n"
 
     mock_gmail = MockGmailClient(approver_email=approver)
@@ -196,6 +199,7 @@ def test_full_lifecycle_end_to_end(tmp_path: Path):
     # -------------------------------------------------------------------------
     ws_mgr = WorkspaceManager(workspace_root=str(tmp_path / "workspaces"))
     patch_generator = PatchGenerator(task_store=store, ai_provider=ai_provider, config=config, workspace_manager=ws_mgr)
+    patch_generator.github_client = mock_github
     gen_ok, patch_record, gen_msg = patch_generator.generate_patch_for_task(task.task_id)
 
     assert gen_ok is True

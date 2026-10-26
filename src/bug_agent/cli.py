@@ -11,7 +11,7 @@ from bug_agent.ai_analyzer import MockAIProvider
 from bug_agent.approval_manager import ApprovalManager
 from bug_agent.candidate_filter import CandidateFilter
 from bug_agent.config import AppConfig, ConfigurationError
-from bug_agent.copilot_adapter import CopilotAdapter
+from bug_agent.codex_adapter import CodexAdapter
 from bug_agent.gmail_client import GmailClient, MockGmailClient
 from bug_agent.issue_scanner import IssueScanner
 from bug_agent.models import RepositoryScanResult, TaskStatus
@@ -87,7 +87,7 @@ def main(argv: List[str] = None) -> int:
     parser.add_argument(
         "--ai-provider",
         type=str,
-        choices=["mock", "copilot"],
+        choices=["mock", "codex"],
         default="mock",
         help="AI provider to use for defect analysis (default: mock)",
     )
@@ -248,7 +248,7 @@ def main(argv: List[str] = None) -> int:
         print(f" RUNNING AI DEFECT ANALYSIS (Provider: {args.ai_provider})")
         print("=" * 60)
 
-        ai_provider = MockAIProvider() if args.ai_provider == "mock" else CopilotAdapter()
+        ai_provider = MockAIProvider() if args.ai_provider == "mock" else CodexAdapter()
         workflow = DefectWorkflow(task_store=task_store, ai_provider=ai_provider, config=config)
         analysis_results = workflow.analyze_all_discovered()
 
@@ -264,6 +264,8 @@ def main(argv: List[str] = None) -> int:
         gmail_client = MockGmailClient(approver_email=config.approver_email or "approver@example.com") if args.mock_gmail else GmailClient(
             credentials_file=config.gmail_credentials_file,
             token_file=config.gmail_token_file,
+            credentials_json=config.gmail_credentials_json,
+            token_json=config.gmail_token_json,
         )
         approval_mgr = ApprovalManager(task_store=task_store, gmail_client=gmail_client, config=config)
 
@@ -310,7 +312,7 @@ def main(argv: List[str] = None) -> int:
             print(f" PATCH GENERATION FOR {target_task_id} (Dry Run: {args.dry_run})")
             print("=" * 60)
 
-            ai_provider = MockAIProvider() if args.ai_provider == "mock" else CopilotAdapter()
+            ai_provider = MockAIProvider() if args.ai_provider == "mock" else CodexAdapter()
             patch_gen = PatchGenerator(task_store=task_store, ai_provider=ai_provider, config=config)
 
             success, patch_rec, message = patch_gen.generate_patch_for_task(target_task_id, dry_run=args.dry_run)

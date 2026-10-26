@@ -233,6 +233,7 @@ class TaskStore:
         issue_body: Optional[str] = None,
         labels: Optional[List[str]] = None,
         author: Optional[str] = None,
+        base_commit_sha: Optional[str] = None,
     ) -> Tuple[Task, bool]:
         """Idempotently record a newly discovered task.
 
@@ -251,11 +252,11 @@ class TaskStore:
                 cursor.execute("""
                     INSERT INTO tasks (
                         task_id, repository, issue_number, issue_url, issue_title,
-                        issue_body, labels, author, status, created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        issue_body, labels, author, status, base_commit_sha, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     task_id, repository, issue_number, issue_url, issue_title,
-                    issue_body, labels_json, author, TaskStatus.DISCOVERED.value,
+                    issue_body, labels_json, author, TaskStatus.DISCOVERED.value, base_commit_sha,
                     now_iso, now_iso
                 ))
                 conn.commit()

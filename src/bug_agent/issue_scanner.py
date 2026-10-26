@@ -47,7 +47,14 @@ class IssueScanner:
 
         try:
             # 1. Verify access
-            self.client.check_repository_access(repository)
+            repo_info = self.client.check_repository_access(repository)
+            base_sha = None
+            default_branch = repo_info.get("default_branch") if isinstance(repo_info, dict) else None
+            if default_branch:
+                try:
+                    base_sha = self.client.get_branch_sha(repository, default_branch)
+                except GitHubAPIError as exc:
+                    logger.warning("Could not capture base revision for %s: %s", repository, exc)
 
             # 2. Fetch issues
             raw_issues = self.client.list_issues(
@@ -90,6 +97,7 @@ class IssueScanner:
                             issue_body=issue.body,
                             labels=issue.labels,
                             author=issue.author,
+                            base_commit_sha=base_sha,
                         )
                     except Exception as e:
                         logger.warning(f"Failed to record task {issue.repository}#{issue.number} in task store: {e}")

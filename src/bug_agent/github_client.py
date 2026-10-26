@@ -117,6 +117,16 @@ class GitHubClient:
             raise GitHubAPIError(f"Unexpected repository payload for {repository}")
         return data
 
+    def get_branch_sha(self, repository: str, branch: str) -> Optional[str]:
+        """Return the current commit SHA for a branch, or None when unavailable."""
+        encoded_branch = urllib.parse.quote(branch, safe="")
+        data, _ = self._request(f"{self.BASE_URL}/repos/{repository}/git/ref/heads/{encoded_branch}")
+        if not isinstance(data, dict):
+            return None
+        obj = data.get("object", {})
+        sha = obj.get("sha") if isinstance(obj, dict) else None
+        return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha) else None
+
     def list_issues(
         self,
         repository: str,

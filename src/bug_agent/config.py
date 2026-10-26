@@ -29,6 +29,8 @@ class AppConfig:
     approver_email: Optional[str] = None
     gmail_credentials_file: str = "credentials.json"
     gmail_token_file: str = "token.json"
+    gmail_credentials_json: Optional[str] = None
+    gmail_token_json: Optional[str] = None
     approval_timeout_hours: int = 48
 
     @classmethod
@@ -80,6 +82,8 @@ class AppConfig:
         approver = os.environ.get("APPROVER_EMAIL", "").strip() or data.get("approver_email") or None
         creds_file = os.environ.get("GMAIL_CREDENTIALS_FILE", "credentials.json")
         tok_file = os.environ.get("GMAIL_TOKEN_FILE", "token.json")
+        creds_json = os.environ.get("GMAIL_CREDENTIALS_JSON") or None
+        token_json = os.environ.get("GMAIL_TOKEN_JSON") or None
         timeout_hrs = int(os.environ.get("APPROVAL_TIMEOUT_HOURS", data.get("approval_timeout_hours", 48)))
 
         return cls(
@@ -93,5 +97,7 @@ class AppConfig:
             approver_email=approver,
             gmail_credentials_file=creds_file,
             gmail_token_file=tok_file,
+            gmail_credentials_json=creds_json,
+            gmail_token_json=token_json,
             approval_timeout_hours=timeout_hrs,
         )

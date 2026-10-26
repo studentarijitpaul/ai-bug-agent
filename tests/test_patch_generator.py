@@ -78,6 +78,7 @@ def test_patch_generation_for_approved_task(tmp_path: Path):
         issue_number=101,
         issue_title="Bug in trainer",
         issue_url="https://github.com/pytorch/ignite/issues/101",
+        base_commit_sha="a" * 40,
     )
     analysis = AnalysisResult(
         task_id=task.task_id,
@@ -106,6 +107,8 @@ def test_patch_generation_for_approved_task(tmp_path: Path):
 
     # Generate patch
     generator = PatchGenerator(task_store=store, ai_provider=MockAIProvider())
+    generator.github_client = MagicMock()
+    generator.github_client.get_file_content.return_value = "def train():\n    pass\n"
     success, record, message = generator.generate_patch_for_task(task.task_id)
 
     assert success is True
@@ -168,6 +171,7 @@ def test_ai_provider_error_handling(tmp_path: Path):
         issue_number=301,
         issue_title="Bug",
         issue_url="https://github.com/pytorch/ignite/issues/301",
+        base_commit_sha="a" * 40,
     )
     analysis = AnalysisResult(
         task_id=task.task_id,
@@ -178,6 +182,7 @@ def test_ai_provider_error_handling(tmp_path: Path):
         bug_classification="SUSPECTED_BUG",
         evidence_summary="Traceback",
         suspected_root_cause="Bug",
+        relevant_files=[FileEvidence(path="src/trainer.py")],
     )
     store.update_task_status(task.task_id, TaskStatus.ANALYZED, extra_fields={"analysis_result": json.dumps(analysis.to_dict())})
     store.update_task_status(task.task_id, TaskStatus.AWAITING_APPROVAL)
@@ -186,6 +191,8 @@ def test_ai_provider_error_handling(tmp_path: Path):
 
     failing_provider = MockAIProvider(failure_mode="timeout")
     generator = PatchGenerator(task_store=store, ai_provider=failing_provider)
+    generator.github_client = MagicMock()
+    generator.github_client.get_file_content.return_value = "def train():\n    pass\n"
     success, record, message = generator.generate_patch_for_task(task.task_id)
 
     assert success is False
