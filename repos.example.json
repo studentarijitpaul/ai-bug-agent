@@ -1,6 +1,6 @@
 {
   "repositories": [
-    "owner/repository"
+    "https://github.com/pytorch/ignite"
   ],
   "issues_per_repository": 30,
   "include_pull_requests": false,

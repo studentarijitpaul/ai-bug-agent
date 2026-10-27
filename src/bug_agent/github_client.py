@@ -127,6 +127,14 @@ class GitHubClient:
         sha = obj.get("sha") if isinstance(obj, dict) else None
         return sha if isinstance(sha, str) and re.fullmatch(r"[0-9a-fA-F]{40}", sha) else None
 
+    def get_issue(self, repository: str, issue_number: int) -> Dict[str, Any]:
+        """Fetch a single issue by number."""
+        url = f"{self.BASE_URL}/repos/{repository}/issues/{issue_number}"
+        data, _ = self._request(url)
+        if not isinstance(data, dict):
+            raise GitHubAPIError(f"Unexpected response fetching issue #{issue_number}")
+        return data
+
     def list_issues(
         self,
         repository: str,

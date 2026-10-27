@@ -1,6 +1,7 @@
 """Tests for publication approval, reviewer email formatting, and GitHubPublisher."""
 
 import json
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import pytest
 from unittest.mock import MagicMock
@@ -62,13 +63,14 @@ def test_process_publication_approval_decision(tmp_path: Path):
     store.update_task_status(task.task_id, TaskStatus.TESTED)
     store.update_task_status(task.task_id, TaskStatus.AWAITING_PUBLICATION_APPROVAL)
 
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
     store.record_publication_request(
         task_id=task.task_id,
         repository=task.repository,
         base_commit_sha="base-sha",
         patch_hash="patch-hash",
         approver_email="approver@example.com",
-        expires_at="2026-10-27T00:00:00Z",
+        expires_at=expires_at,
     )
 
     mock_gmail = MockGmailClient(approver_email="approver@example.com")
@@ -104,13 +106,14 @@ def test_process_publication_rejection_decision(tmp_path: Path):
     store.update_task_status(task.task_id, TaskStatus.TESTED)
     store.update_task_status(task.task_id, TaskStatus.AWAITING_PUBLICATION_APPROVAL)
 
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=2)).isoformat()
     store.record_publication_request(
         task_id=task.task_id,
         repository=task.repository,
         base_commit_sha="base-sha",
         patch_hash="patch-hash",
         approver_email="approver@example.com",
-        expires_at="2026-10-27T00:00:00Z",
+        expires_at=expires_at,
     )
 
     mock_gmail = MockGmailClient(approver_email="approver@example.com")

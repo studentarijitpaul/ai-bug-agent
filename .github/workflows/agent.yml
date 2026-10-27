@@ -1,0 +1,82 @@
+name: Bug agent (offline analysis & approvals)
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Analyze new issues and request approval, or process approval replies
+        required: true
+        type: choice
+        options: [analyze_and_request, check_replies]
+        default: analyze_and_request
+      issue_limit:
+        description: Maximum issues to fetch per configured repository
+        required: true
+        default: "5"
+        type: choice
+        options: ["1", "5", "10", "20"]
+
+permissions:
+  contents: read
+  issues: read
+  actions: read
+
+concurrency:
+  group: bug-agent-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  run-agent:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Restore best-effort task state
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: .agent-state/
+          key: ${{ runner.os }}-bug-agent-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            ${{ runner.os }}-bug-agent-${{ github.ref_name }}-
+
+      - name: Install agent and Gmail dependencies
+        run: python -m pip install -e '.[gmail]'
+
+      - name: Run agent
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          GMAIL_CREDENTIALS_JSON: ${{ secrets.GMAIL_CREDENTIALS_JSON }}
+          APPROVER_EMAIL: ${{ secrets.APPROVER_EMAIL }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          DATABASE_PATH: .agent-state/tasks.db
+          STATE_JSON_PATH: .agent-state/state.json
+          OPERATION: ${{ inputs.operation }}
+          ISSUE_LIMIT: ${{ inputs.issue_limit }}
+        shell: bash
+        run: |
+          mkdir -p .agent-state
+          if [[ "$OPERATION" == "analyze_and_request" ]]; then
+            bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals
+          elif [[ "$OPERATION" == "check_replies" ]]; then
+            bug-agent --config repos.json --limit "$ISSUE_LIMIT" --ai-provider mock --check-approvals
+          else
+            echo "Unsupported operation." >&2
+            exit 2
+          fi
+          echo '## Bug agent (offline analysis & approvals)' >> "$GITHUB_STEP_SUMMARY"
+          echo "- Operation: $OPERATION" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Issue limit per repository: $ISSUE_LIMIT" >> "$GITHUB_STEP_SUMMARY"
+          echo '- Analysis runs fully offline and deterministically without external AI APIs.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Approval replies are checked against the configured approver and exact task command.' >> "$GITHUB_STEP_SUMMARY"
+          echo '- Patch generation and publication are not run by this workflow.' >> "$GITHUB_STEP_SUMMARY"

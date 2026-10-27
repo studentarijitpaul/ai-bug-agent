@@ -43,12 +43,11 @@ github_agent/
 ├── pyproject.toml           # Packaging metadata, entrypoints & pytest config
 ├── run_all_tests.py         # Self-contained test suite runner (zero extra deps)
 ├── src/bug_agent/
-│   ├── ai_analyzer.py       # AI provider abstraction, prompt assembly & validator
+│   ├── ai_analyzer.py       # Rule-based offline analysis provider & evidence validator
 │   ├── approval_manager.py  # Inbound email command validation & state transitions
 │   ├── candidate_filter.py  # Bug candidate filtering, bot rejection & deduplication
 │   ├── cli.py               # Command-line interface
 │   ├── config.py            # Runtime configuration parsing and validation
-│   ├── codex_adapter.py     # OpenAI Responses API provider using a Codex model
 │   ├── github_client.py     # Resilient, read-only GitHub REST API client
 │   ├── gmail_client.py      # Gmail REST API client (least privilege) & mock client
 │   ├── issue_scanner.py     # Multi-repository scanner with stage diagnostics
@@ -143,7 +142,7 @@ Or run using the self-contained standard library test runner:
 ```powershell
 python run_all_tests.py
 ```
-*Current test suite status: **84 passed across 13 test modules** with 0 failures.*
+*Current test suite status: **98 passed across 14 test modules** with 0 failures.*
 
 ---
 
@@ -155,6 +154,17 @@ Discovers candidate issues, filters out bots and pull requests, and records new 
 python -m bug_agent.cli --config repos.json
 ```
 *Diagnostic stage summaries display exact counts of raw items fetched, pull requests excluded, and candidate filter reasons.*
+
+### Direct Issue Dispatch to Gmail
+Send any specific issue from `pytorch/ignite` (or task ID) directly to your Gmail address:
+```powershell
+# Send an issue report / approval request to your Gmail:
+python -m bug_agent.cli --send-issue 3879 --email your_email@gmail.com
+
+# Simulated / Mock Gmail mode (no live OAuth needed):
+python -m bug_agent.cli --send-issue 3879 --email your_email@gmail.com --mock-gmail
+```
+*If the issue is not already recorded in the SQLite database, it is automatically fetched from GitHub (`pytorch/ignite`), recorded, analyzed offline, and dispatched to your email address.*
 
 ### Step 2: Inspect Database Status
 Inspect all stored tasks and their lifecycle approval states without triggering a remote GitHub scan:
@@ -175,13 +185,14 @@ python -m bug_agent.cli --config repos.json --analyze --ai-provider mock
 To send approval requests for `ANALYZED` tasks:
 ```powershell
 # Mock Gmail mode (simulated queue, no live credentials required):
-python -m bug_agent.cli --request-approvals --mock-gmail --approver dev@example.com
+$env:APPROVER_EMAIL = "dev@example.com"
+python -m bug_agent.cli --request-approvals --mock-gmail
 
 # Check for inbound approval replies:
 python -m bug_agent.cli --check-approvals --mock-gmail
 ```
 
-In production Gmail mode (`--approver approver@example.com` without `--mock-gmail`), the approver receives an email containing defect evidence and replies with:
+In production Gmail mode, set `APPROVER_EMAIL` in the environment and omit `--mock-gmail`. The approver receives defect evidence and replies with:
 - `APPROVE TASK-owner-repo-123` to authorize patch generation.
 - `REJECT TASK-owner-repo-123` to reject the task.
 
@@ -229,34 +240,32 @@ python -m bug_agent.cli --publish TASK-owner-repo-123 --dry-run
 
 ---
 
-## 7. AI Provider Integration Status
+## 7. Defect Analysis & Offline Deterministic Execution
 
-### Mock AI Provider
-- Fully functional, offline, deterministic, and bundled by default.
-- Implements simulated timeouts, format errors, and API failures for robust error recovery testing.
-
-### OpenAI Codex provider (`codex_adapter.py`)
-
-Select `--ai-provider codex` to use the OpenAI Responses API with the configured GPT-6 Astra model. Set `OPENAI_API_KEY` in the process environment; the key is never logged. API use requires an OpenAI API key and billing/credits configured separately from any ChatGPT subscription. The provider validates JSON results and has a request timeout. `--ai-provider mock` remains available offline. This adapter performs model inference; it is distinct from the hosted Codex agent harness.
-
-The GitHub-hosted workflow at `.github/workflows/bug-agent.yml` is manually triggered, read-only, and runs the existing CLI with offline mock analysis. Hosted Codex analysis is not enabled because repository issue/source context would be transmitted to `api.openai.com`; the automatic approval reviewer rejected that workflow until the external destination and data authorization are verified. The official [Codex GitHub Action](https://github.com/openai/codex-action) is the supported hosted Codex execution integration and requires `OPENAI_API_KEY` as a GitHub Actions secret.
+- **Zero Paid AI Services / No OpenAI API Key**: Bug defect analysis is fully offline, local, and deterministic. No OpenAI API key or paid AI service is required or configured.
+- **Rule-Based Heuristic Analysis**: Defect analysis uses deterministic keyword matching and repository file context inspection. It does not provide or claim to provide AI-powered analysis.
+- **Provider Removal**: The OpenAI/Codex API provider (`codex_adapter.py`) has been removed from the repository. The CLI accepts `--ai-provider mock` for offline rule-based execution.
+- **Hosted GitHub Actions**: The manually triggered `.github/workflows/agent.yml` workflow runs offline defect analysis without any OpenAI secret. It uses Gmail API only for human approval workflows when selected.
+- **Repository Secrets**: GitHub Actions requires only `GMAIL_TOKEN_JSON`, `GMAIL_CREDENTIALS_JSON`, and `APPROVER_EMAIL` if human email approval is enabled; no AI keys or external LLM service credentials are required. `GITHUB_TOKEN` is supplied automatically by GitHub Actions. The workflow caches `.agent-state/tasks.db` and non-secret `state.json` between runs.
 
 ---
 
-## 8. Gmail OAuth Setup & Permissions
+## 8. Gmail Human Approval Flow & OAuth Setup
+
+The Gmail API is utilized **exclusively for human approval communication** (sending investigation reports to the designated reviewer and polling task-specific inbound replies: `APPROVE TASK-...`, `REJECT TASK-...`, or `APPROVE PUBLISH TASK-...`). **Gmail is not and must never be used as an AI provider.**
 
 When transitioning from `--mock-gmail` to production Gmail:
 1. Create a project in the [Google Cloud Console](https://console.cloud.google.com/).
 2. Enable the **Gmail API**.
-3. Create OAuth 2.0 Desktop Application credentials and download as `credentials.json`.
+3. Create OAuth 2.0 Desktop Application credentials. Keep the JSON private; do not commit a credentials file.
 4. The agent requests **least-privilege scopes**:
    - `https://www.googleapis.com/auth/gmail.send` (send approval requests only)
    - `https://www.googleapis.com/auth/gmail.readonly` (poll incoming decision replies only)
-5. Complete OAuth authorization on a trusted local machine once, with the two scopes above, then securely store the resulting authorized-user token JSON (including `refresh_token`) as the `GMAIL_TOKEN_JSON` Actions secret. The secret value is the complete JSON object, not a path. Optionally provide OAuth client JSON in `GMAIL_CREDENTIALS_JSON`; no browser flow is attempted by the application.
+5. Complete OAuth authorization on a trusted machine with the two scopes above and offline access, then securely store the authorized-user token JSON (including `refresh_token`) as the `GMAIL_TOKEN_JSON` Actions secret. The secret value is the complete JSON object, not a path. Provide the OAuth client JSON in `GMAIL_CREDENTIALS_JSON`. The app reads credentials only from environment variables and does not create local credential files.
 6. On a hosted runner, add `GMAIL_TOKEN_JSON`, `GMAIL_CREDENTIALS_JSON` (if needed), and `APPROVER_EMAIL` as repository or environment secrets/variables. Never echo these values or upload them as artifacts. Keep local `credentials.json` and `token.json` excluded from version control.
 7. Google OAuth consent in **Testing** mode limits refresh-token lifetime (commonly seven days for non-basic scopes) and eligible test users; promote/configure the consent screen as appropriate for durable use. Revocation, expiry, or policy changes cause the workflow to fail closed and require reauthorization.
 
-Live approval email commands remain separate: `APPROVE TASK-…` authorizes patch work, while `APPROVE PUBLISH TASK-…` authorizes draft PR publication. Gmail operations are explicit CLI stages and are not part of the initial hosted workflow.
+Live approval commands remain explicit and task-bound: reply `APPROVE TASK-…` or `REJECT TASK-…` to decide whether patch work is authorized. Free-form “Approved” text is ignored. Publication approval remains a separate `APPROVE PUBLISH TASK-…` command.
 
 ---
 
@@ -284,7 +293,7 @@ Live approval email commands remain separate: `APPROVE TASK-…` authorizes patc
 ## 10. Known Limitations
 
 - **Container Runtime**: Full sandboxed test execution requires a local Docker daemon. Systems without Docker must use `--mock-sandbox` or tests transition to `NEEDS_REVIEW`.
-- **Hosted state**: GitHub-hosted runners are ephemeral. The workflow stores SQLite under the runner's temporary directory, so deduplication, approvals, and audit history do not persist between runs. Do not use hosted approval, patch, or publication stages until durable external storage is implemented and configured.
+- **Hosted state**: GitHub-hosted runners are ephemeral. The workflow caches SQLite plus a non-secret status checkpoint; cache eviction or retention can lose state, so this is not a durable database or audit archive. Do not rely on cache alone for long-term approval history.
 - **Patch target revision**: Patch generation requires a recorded base commit SHA and fetchable original source files. It fails closed if either is unavailable and never synthesizes a fake source file.
 - **Network Boundaries**: In Docker test mode, `--network none` prevents dependency downloads during test execution; dependencies must be pre-installed in the container base image.
 

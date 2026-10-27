@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple
 
-from bug_agent.config import AppConfig
+from bug_agent.config import ALLOWED_REPOSITORY, AppConfig, is_allowed_repository
 from bug_agent.github_client import GitHubAPIError, GitHubClient
 from bug_agent.models import Task, TaskStatus
 from bug_agent.task_store import TaskStore
@@ -78,6 +78,10 @@ class GitHubPublisher:
         task = self.task_store.get_task(task_id)
         if not task:
             return False, None, f"Task '{task_id}' not found."
+
+        # Repository scope check: Never modify, comment on, or publish to another repository
+        if not is_allowed_repository(task.repository):
+            return False, None, f"Repository '{task.repository}' is out of scope. Publication is restricted to https://github.com/{ALLOWED_REPOSITORY}."
 
         if task.status != TaskStatus.AWAITING_PUBLICATION_APPROVAL:
             return False, None, f"Task '{task_id}' is in status '{task.status.value}'. Expected AWAITING_PUBLICATION_APPROVAL."

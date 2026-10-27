@@ -62,7 +62,7 @@ Issue: #{task.issue_number} ({task.issue_url})
 Status: AWAITING APPROVAL
 
 --------------------------------------------------
-DISCLAIMER: This analysis is AI-generated and UNVERIFIED.
+NOTICE: This defect analysis is generated via offline rule-based heuristics and is UNVERIFIED.
 No patches or tests have been executed on the target repository.
 --------------------------------------------------
 
@@ -105,13 +105,13 @@ This approval request will expire on: {expires_at}
         html_body = f"""<html>
 <body style="font-family: Arial, sans-serif; line-height: 1.5; color: #333;">
   <div style="background-color: #f4f4f4; padding: 15px; border-left: 4px solid #0066cc;">
-    <h2 style="margin-top: 0;">AI Defect Analysis: {task.repository} #{task.issue_number}</h2>
+    <h2 style="margin-top: 0;">Defect Analysis: {task.repository} #{task.issue_number}</h2>
     <p><strong>Task ID:</strong> <code>{task.task_id}</code> | <strong>Status:</strong> AWAITING APPROVAL</p>
     <p><a href="{task.issue_url}">View original GitHub issue</a></p>
   </div>
 
   <div style="background-color: #fff3cd; padding: 10px; margin: 15px 0; border: 1px solid #ffeeba; color: #856404;">
-    <strong>Notice:</strong> This analysis is AI-generated and unverified. Code changes have not been generated or tested.
+    <strong>Notice:</strong> This defect analysis is generated via offline rule-based heuristics and is unverified. Code changes have not been generated or tested.
   </div>
 
   <h3>Issue Summary</h3>
@@ -141,18 +141,24 @@ This approval request will expire on: {expires_at}
 
         return plain_text, html_body
 
-    def request_approval_for_task(self, task: Task) -> Optional[ApprovalRequest]:
+    def request_approval_for_task(
+        self,
+        task: Task,
+        force_resend: bool = False,
+        recipient_email: Optional[str] = None,
+    ) -> Optional[ApprovalRequest]:
         """Send approval email for an ANALYZED task and transition it to AWAITING_APPROVAL."""
-        if task.status != TaskStatus.ANALYZED:
+        if task.status != TaskStatus.ANALYZED and not (force_resend and task.status == TaskStatus.AWAITING_APPROVAL):
             logger.info(f"Task {task.task_id} is in status {task.status.value}, skipping approval request.")
             return None
 
         existing_request = self.task_store.get_approval_request(task.task_id)
-        if existing_request is not None:
+        if existing_request is not None and not force_resend:
             logger.info("Approval request already exists for %s; skipping duplicate email.", task.task_id)
             return existing_request
 
-        if not self.config.approver_email:
+        target_email = recipient_email or self.config.approver_email
+        if not target_email:
             logger.error("Cannot request approval: APPROVER_EMAIL is not configured.")
             return None
 
@@ -170,9 +176,9 @@ This approval request will expire on: {expires_at}
         plain_text, html_body = self.format_approval_email(task, analysis, expires_at)
 
         try:
-            logger.info(f"Sending approval request email to {self.config.approver_email} for task {task.task_id}...")
+            logger.info(f"Sending approval request email to {target_email} for task {task.task_id}...")
             msg_id, thread_id = self.gmail_client.send_email(
-                to=self.config.approver_email,
+                to=target_email,
                 subject=subject,
                 body_text=plain_text,
                 body_html=html_body,
@@ -181,25 +187,78 @@ This approval request will expire on: {expires_at}
             logger.error(f"Failed sending approval email for {task.task_id}: {e}")
             return None
 
-        # Transition task to AWAITING_APPROVAL
-        self.task_store.update_task_status(
-            task_id=task.task_id,
-            new_status=TaskStatus.AWAITING_APPROVAL,
-            extra_fields={"approval_requested_at": now.isoformat()},
-        )
+        # Transition task to AWAITING_APPROVAL if not already there
+        if task.status != TaskStatus.AWAITING_APPROVAL:
+            self.task_store.update_task_status(
+                task_id=task.task_id,
+                new_status=TaskStatus.AWAITING_APPROVAL,
+                extra_fields={"approval_requested_at": now.isoformat()},
+            )
 
         # Record approval request in database
         req = self.task_store.record_approval_request(
             task_id=task.task_id,
             repository=task.repository,
             issue_number=task.issue_number,
-            approver_email=self.config.approver_email.lower(),
+            approver_email=target_email.lower(),
             expires_at=expires_at,
             message_id=msg_id,
             thread_id=thread_id,
         )
         logger.info(f"Task {task.task_id} transitioned to AWAITING_APPROVAL (Request recorded).")
         return req
+
+    def send_issue_notification(
+        self,
+        task: Task,
+        recipient_email: Optional[str] = None,
+    ) -> Tuple[bool, str]:
+        """Send an issue notification or approval email directly to a recipient's Gmail."""
+        target_email = recipient_email or self.config.approver_email
+        if not target_email:
+            return False, "No recipient Gmail address provided. Supply --email or set APPROVER_EMAIL."
+
+        if task.analysis_result:
+            req = self.request_approval_for_task(task, force_resend=True, recipient_email=target_email)
+            if req:
+                return True, f"Approval request email for {task.task_id} successfully sent to {target_email}."
+            return False, f"Failed sending approval request email for {task.task_id} to {target_email}."
+
+        subject = f"[GITHUB ISSUE] #{task.issue_number}: {task.issue_title} ({task.repository})"
+        plain_text = f"""[GITHUB ISSUE REPORT]
+Repository: {task.repository}
+Issue Number: #{task.issue_number}
+Issue URL: {task.issue_url}
+Title: {task.issue_title}
+Status: {task.status.value}
+Author: {task.author or 'Unknown'}
+
+ISSUE DESCRIPTION:
+--------------------------------------------------
+{task.issue_body or '(No description provided)'}
+--------------------------------------------------
+"""
+        html_body = f"""<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.5; color: #333;">
+  <div style="background-color: #f4f4f4; padding: 15px; border-left: 4px solid #0066cc;">
+    <h2 style="margin-top: 0;">Issue #{task.issue_number}: {task.issue_title}</h2>
+    <p><strong>Repository:</strong> {task.repository} | <strong>Task ID:</strong> <code>{task.task_id}</code></p>
+    <p><a href="{task.issue_url}">View on GitHub</a></p>
+  </div>
+  <h3>Issue Description</h3>
+  <pre style="white-space: pre-wrap; background-color: #f9f9f9; padding: 10px; border: 1px solid #ddd;">{task.issue_body or '(No description provided)'}</pre>
+</body>
+</html>"""
+        try:
+            self.gmail_client.send_email(
+                to=target_email,
+                subject=subject,
+                body_text=plain_text,
+                body_html=html_body,
+            )
+            return True, f"Issue #{task.issue_number} report successfully sent to {target_email}."
+        except Exception as e:
+            return False, f"Failed sending issue email to {target_email}: {e}"
 
     def request_publication_approval_for_task(self, task: Task) -> bool:
         """Send publication review email for a TESTED task and transition it to AWAITING_PUBLICATION_APPROVAL."""

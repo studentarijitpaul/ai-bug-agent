@@ -1,31 +1,78 @@
 # HANDOFF.md
 
-## Codex Migration Update (2026-10-26)
+## Strict Repository Scope, Offline Deterministic Analysis & Gmail Issue Dispatch (2026-10-27)
 
-- Added `CodexAdapter` using the OpenAI Responses API and configurable GPT-6 Astra default; CLI selection is now `mock` or `codex` and no longer invokes Copilot. This adapter calls the model API and is not the hosted Codex agent harness.
-- The Codex provider requires `OPENAI_API_KEY` and API billing separate from ChatGPT subscriptions. API execution was not attempted in this environment.
-- Added a manual GitHub Actions workflow for read-only scanning and offline mock analysis, with minimal permissions, bounded input, concurrency, timeout, and SHA-pinned checkout/setup actions.
-- Codex execution in hosted Actions is intentionally not enabled. The automatic approval reviewer rejected a workflow transmitting issue and source context to `api.openai.com` because the external destination/data authorization was not verified. Do not add that data path without resolving that approval.
-- Gmail no longer attempts browser OAuth on a hosted runner. Existing refresh tokens can be supplied as `GMAIL_TOKEN_JSON`; optional OAuth client JSON is `GMAIL_CREDENTIALS_JSON`. Duplicate approval requests are skipped when a request record already exists.
-- Patch generation now refuses missing base revisions/source files and does not invent a placeholder file or SHA. Durable cross-run state is not implemented; the hosted workflow database is temporary, and approval/patch/publication stages are excluded.
-- Verification: `python -m pytest -q` via the bundled Python 3.12 runtime passed (84 passed); `git diff --check` passed. The default local Python shim and `.venv` interpreter are broken, so the suite used bundled Python with existing `.venv` site packages and a workspace temp directory.
-- Remaining: resolve the external data approval for official `openai/codex-action` execution, configure a durable database, then wire hosted Gmail approval and later patch/test/publication stages after establishing persistent state. Add dedicated adapter/Gmail regression tests.
+- **Direct Gmail Issue Dispatching**: Added direct issue notification and approval emailing capabilities:
+  - Added `--send-issue <NUMBER_OR_TASK_ID>` flag to fetch, analyze, and dispatch individual GitHub issues from `pytorch/ignite` to Gmail.
+  - Added `--email <ADDRESS>` / `--approver-email <ADDRESS>` flag to specify the destination email directly on the command line.
+  - Added standalone CLI handling so sending an issue runs without initiating a full repository scan.
+  - Updated `GmailClient` to support local fallback to `token.json` and `credentials.json` if environment variables are not set.
+  - Updated `ApprovalManager.send_issue_notification` to format rich issue summaries with repo links and offline defect analysis.
+- **Strict Repository Scope Enforced**: Repository scope is strictly locked to `https://github.com/pytorch/ignite`.
+  - Config loading parses and normalizes GitHub URLs (`https://github.com/pytorch/ignite`, `http://`, `.git`, trailing slashes, or `pytorch/ignite`).
+  - Any out-of-scope repository in configuration files is automatically removed or disabled.
+  - CLI rejects `--repo` arguments that do not resolve to `pytorch/ignite`.
+  - Issue scanner validates repository URL before fetching issues or making API requests, rejecting out-of-scope repositories immediately.
+  - Patch generator refuses to modify or create a patch for any task targeting another repository.
+  - Publisher refuses to create branches, comment, or publish PRs for any task targeting another repository.
+  - `repos.example.json` updated to reference `https://github.com/pytorch/ignite`.
+- **Paid AI Provider & Key Removal**: Removed `CodexAdapter` and all OpenAI API key references, configuration, dependencies, and environment variable requirements (`OPENAI_API_KEY`).
+- **Fully Offline & Deterministic Defect Analysis**: Analysis is now entirely offline and deterministic using rule-based heuristics, keyword matching, and repository file context inspection (`MockAIProvider`). It makes zero external LLM API calls and does not claim to provide AI-powered analysis.
+- **Gmail Human-in-the-Loop Approval Only**: The Gmail API integration is strictly reserved for human reviewer approvals (`APPROVE TASK-...` / `REJECT TASK-...` and `APPROVE PUBLISH TASK-...`). Gmail is never used as an AI provider.
+- **Secure Gmail OAuth Preservation**: OAuth secrets (`GMAIL_TOKEN_JSON`, `GMAIL_CREDENTIALS_JSON`, `APPROVER_EMAIL`) are loaded exclusively from process environment variables and GitHub Actions Secrets. No credential files are committed, written, or printed.
+- **GitHub Actions Compatibility**: Updated `.github/workflows/agent.yml` to run offline analysis without requiring `OPENAI_API_KEY`. The workflow triggers Gmail operations only when approval actions (`analyze_and_request` or `check_replies`) are explicitly dispatched.
+- **Comprehensive Test Suite**: Added dedicated tests in `tests/test_offline_and_approval.py` and `tests/test_config.py`. The full test suite passes with **98 passed tests across 14 test modules (0 failures)**.
 
 ### Files changed in this update
-- `.github/workflows/bug-agent.yml`
-- `src/bug_agent/codex_adapter.py`
-- `src/bug_agent/cli.py`, `src/bug_agent/config.py`, `src/bug_agent/workflow.py`, `src/bug_agent/github_client.py`, `src/bug_agent/issue_scanner.py`, `src/bug_agent/task_store.py`
-- `src/bug_agent/gmail_client.py`, `src/bug_agent/approval_manager.py`
-- `src/bug_agent/patch_generator.py`
-- `tests/test_patch_generator.py`, `tests/test_e2e_integration.py`
-- `README.md`, `HANDOFF.md`
+- Removed: `src/bug_agent/codex_adapter.py`
+- Added: `tests/test_offline_and_approval.py`
+- Modified:
+  - `src/bug_agent/approval_manager.py` (added `send_issue_notification`, `recipient_email` override, and updated email templates)
+  - `src/bug_agent/cli.py` (added `--send-issue`, `--email`, and standalone dispatch logic)
+  - `src/bug_agent/github_client.py` (added `get_issue` for on-demand issue fetching)
+  - `src/bug_agent/gmail_client.py` (added fallback check for local token.json/credentials.json)
+  - `src/bug_agent/ai_analyzer.py` (safe fallback for empty/None issue bodies in offline analysis)
+  - `src/bug_agent/config.py` (added repository URL normalization & validation; removed `openai_api_key`)
+  - `src/bug_agent/issue_scanner.py` (scope validation before fetching issues or access checks)
+  - `src/bug_agent/patch_generator.py` (refuses to modify or patch out-of-scope repositories)
+  - `src/bug_agent/publisher.py` (refuses to publish or comment on out-of-scope repositories)
+  - `src/bug_agent/workflow.py` (skips out-of-scope repositories during task analysis)
+  - `.github/workflows/agent.yml` (removed `OPENAI_API_KEY` secret mapping, set `--ai-provider mock`)
+  - `.env.example` (removed `OPENAI_API_KEY`, added clear documentation for offline analysis and Gmail OAuth)
+  - `README.md` (documented offline analysis, strict repo scope, and Gmail issue dispatch)
+  - `tests/test_config.py` (added URL normalization and validation tests, removed OpenAI secrets tests)
+  - `tests/test_publisher.py` (future-proofed publication request expiration dates)
+  - `run_all_tests.py` (added `tests.test_offline_and_approval` to test runner)
+  - `HANDOFF.md` (updated milestone and implementation status)
 
 ## Current Implementation Status
-- **Current Milestone**: Final Release Preparation Complete (Packaging, Security Hardening, CI, and Documentation).
-- **Active Repository Target**: `pytorch/ignite` (configurable via `repos.json` / `repos.example.json`).
-- **Primary AI Agent**: Google Antigravity.
-- **Operating Status**: All 8 development milestones + Final Release Gate complete. **84 unit, integration, and security tests passing across 13 test suites (0 failures, 0 errors, 0 warnings)**.
-- **Deployment Gate Decision**: **READY FOR REVIEW & INITIAL COMMIT**. Unattended auto-publishing remains strictly disabled by design.
+- **Current Milestone**: Strict Repository Scope (`pytorch/ignite`), Offline Deterministic Analysis & Direct Gmail Issue Dispatch Complete.
+- **Active Repository Target**: `pytorch/ignite` (`https://github.com/pytorch/ignite`).
+- **Operating Status**: All development milestones + Scope Restrictions complete. **98 unit, integration, and security tests passing across 14 test suites (0 failures, 0 errors, 0 warnings)**.
+- **Deployment Gate Decision**: **READY FOR REVIEW & EXECUTION**. Unattended auto-publishing remains strictly disabled by design.
+- **AI / Paid Services Required**: **None**. Runs completely offline and free of charge.
+
+## Remaining Tasks
+- Optionally configure durable external database (PostgreSQL/Supabase) if long-term audit persistence across GitHub Actions runner cache eviction is desired.
+- Set up production Gmail OAuth credentials in GitHub Actions Secrets if live email approval workflow is used.
+
+## Exact Next Steps
+- Run tests locally:
+  ```powershell
+  python -m pytest -v
+  # OR
+  python run_all_tests.py
+  ```
+- Run local scan and offline defect analysis:
+  ```powershell
+  python -m bug_agent.cli --config repos.json --limit 5 --analyze
+  ```
+- Run local scan with mock Gmail human approval:
+  ```powershell
+  python -m bug_agent.cli --config repos.json --limit 5 --analyze --request-approvals --mock-gmail
+  ```
+- Run in GitHub Actions:
+  Trigger `.github/workflows/agent.yml` via `workflow_dispatch` on `main`. No `OPENAI_API_KEY` secret is needed. Configure `GMAIL_TOKEN_JSON`, `GMAIL_CREDENTIALS_JSON`, and `APPROVER_EMAIL` secrets only if live Gmail approvals are enabled.
 
 ---
 

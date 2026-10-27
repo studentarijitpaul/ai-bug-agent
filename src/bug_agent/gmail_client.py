@@ -15,7 +15,6 @@ import re
 from dataclasses import dataclass, field
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
-from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 logger = logging.getLogger(__name__)
@@ -112,17 +111,11 @@ class GmailClient(GmailClientBase):
 
     def __init__(
         self,
-        credentials_file: str = "credentials.json",
-        token_file: str = "token.json",
         scopes: Optional[List[str]] = None,
-        credentials_json: Optional[str] = None,
-        token_json: Optional[str] = None,
     ):
-        self.credentials_file = credentials_file
-        self.token_file = token_file
         self.scopes = scopes or GMAIL_SCOPES
-        self.credentials_json = credentials_json or os.environ.get("GMAIL_CREDENTIALS_JSON")
-        self.token_json = token_json or os.environ.get("GMAIL_TOKEN_JSON")
+        self.credentials_json = os.environ.get("GMAIL_CREDENTIALS_JSON")
+        self.token_json = os.environ.get("GMAIL_TOKEN_JSON")
         self._service = None
 
     def _get_service(self):
@@ -139,24 +132,36 @@ class GmailClient(GmailClientBase):
                 "Missing Google client dependencies. Install with: pip install google-api-python-client google-auth-oauthlib"
             )
 
-        creds = None
-        if self.token_json:
+        token_str = self.token_json or os.environ.get("GMAIL_TOKEN_JSON")
+        if not token_str and os.path.isfile("token.json"):
             try:
-                token_info = json.loads(self.token_json)
-                if self.credentials_json:
-                    client_info = json.loads(self.credentials_json)
-                    client_info = client_info.get("installed", client_info.get("web", client_info))
-                    token_info.setdefault("client_id", client_info.get("client_id"))
-                    token_info.setdefault("client_secret", client_info.get("client_secret"))
-                    token_info.setdefault("token_uri", client_info.get("token_uri", "https://oauth2.googleapis.com/token"))
-                creds = Credentials.from_authorized_user_info(token_info, self.scopes)
+                with open("token.json", "r", encoding="utf-8") as tf:
+                    token_str = tf.read().strip()
             except Exception as e:
-                raise GmailAuthError(f"GMAIL_TOKEN_JSON is invalid: {type(e).__name__}") from None
-        elif os.path.exists(self.token_file):
+                logger.debug("Failed reading local token.json: %s", e)
+
+        if not token_str:
+            raise GmailAuthError("GMAIL_TOKEN_JSON is required; file-based and interactive OAuth are disabled.")
+
+        creds_str = self.credentials_json or os.environ.get("GMAIL_CREDENTIALS_JSON")
+        if not creds_str and os.path.isfile("credentials.json"):
             try:
-                creds = Credentials.from_authorized_user_file(self.token_file, self.scopes)
+                with open("credentials.json", "r", encoding="utf-8") as cf:
+                    creds_str = cf.read().strip()
             except Exception as e:
-                logger.warning(f"Failed to read existing token file {self.token_file}: {e}")
+                logger.debug("Failed reading local credentials.json: %s", e)
+
+        try:
+            token_info = json.loads(token_str)
+            if creds_str:
+                client_info = json.loads(creds_str)
+                client_info = client_info.get("installed", client_info.get("web", client_info))
+                token_info.setdefault("client_id", client_info.get("client_id"))
+                token_info.setdefault("client_secret", client_info.get("client_secret"))
+                token_info.setdefault("token_uri", client_info.get("token_uri", "https://oauth2.googleapis.com/token"))
+            creds = Credentials.from_authorized_user_info(token_info, self.scopes)
+        except Exception as e:
+            raise GmailAuthError(f"GMAIL_TOKEN_JSON is invalid: {type(e).__name__}") from None
 
         if not creds or not creds.valid:
             if creds and creds.expired and creds.refresh_token:
@@ -164,26 +169,18 @@ class GmailClient(GmailClientBase):
                     logger.info("Refreshing expired Gmail OAuth token...")
                     creds.refresh(Request())
                 except Exception as e:
-                    raise GmailAuthError(f"Failed to refresh OAuth token: {e}")
+                    raise GmailAuthError(f"Failed to refresh OAuth token ({type(e).__name__}).") from None
             else:
                 raise GmailAuthError(
                     "No valid Gmail refresh token is available. Interactive OAuth is disabled; "
                     "supply GMAIL_TOKEN_JSON with an authorized-user OAuth JSON containing a refresh_token."
                 )
 
-            # Store credentials securely
-            try:
-                Path(self.token_file).parent.mkdir(parents=True, exist_ok=True)
-                with open(self.token_file, "w", encoding="utf-8") as token_out:
-                    token_out.write(creds.to_json())
-            except Exception:
-                logger.error("Failed saving refreshed Gmail OAuth credentials.")
-
         try:
             self._service = build("gmail", "v1", credentials=creds, cache_discovery=False)
             return self._service
         except Exception as e:
-            raise GmailError(f"Failed to initialize Gmail API service: {e}")
+            raise GmailError(f"Failed to initialize Gmail API service ({type(e).__name__}).") from None
 
     def send_email(self, to: str, subject: str, body_text: str, body_html: Optional[str] = None) -> Tuple[str, str]:
         service = self._get_service()
@@ -201,7 +198,7 @@ class GmailClient(GmailClientBase):
             thread_id = sent.get("threadId", "")
             return msg_id, thread_id
         except Exception as e:
-            raise GmailError(f"Failed to send email to {to}: {e}")
+            raise GmailError(f"Failed to send approval email ({type(e).__name__}).") from None
 
     def fetch_inbound_replies(self, query: str = "is:unread") -> List[InboundEmail]:
         service = self._get_service()
@@ -209,7 +206,7 @@ class GmailClient(GmailClientBase):
             res = service.users().messages().list(userId="me", q=query).execute()
             messages = res.get("messages", [])
         except Exception as e:
-            raise GmailError(f"Failed listing messages with query '{query}': {e}")
+            raise GmailError(f"Failed listing Gmail messages ({type(e).__name__}).") from None
 
         results: List[InboundEmail] = []
         for m in messages:
@@ -244,7 +241,7 @@ class GmailClient(GmailClientBase):
                     headers=headers_map,
                 ))
             except Exception as e:
-                logger.warning(f"Failed fetching details for message {msg_id}: {e}")
+                logger.warning("Failed fetching Gmail message details (%s).", type(e).__name__)
 
         return results
 

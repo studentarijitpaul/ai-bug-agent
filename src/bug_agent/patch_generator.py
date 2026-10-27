@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
 from bug_agent.ai_analyzer import AIProviderBase, AIProviderError, AnalysisResult, MockAIProvider
-from bug_agent.config import AppConfig
+from bug_agent.config import ALLOWED_REPOSITORY, AppConfig, is_allowed_repository
 from bug_agent.github_client import GitHubClient
 from bug_agent.models import ApprovalStatus, Task, TaskStatus
 from bug_agent.task_store import TaskStore
@@ -179,6 +179,10 @@ class PatchGenerator:
         task = self.task_store.get_task(task_id)
         if not task:
             return False, None, f"Task '{task_id}' not found in database."
+
+        # Repository scope check: Never modify or create a patch for another repository
+        if not is_allowed_repository(task.repository):
+            return False, None, f"Repository '{task.repository}' is out of scope. Modifying or creating a patch is restricted to https://github.com/{ALLOWED_REPOSITORY}."
 
         # 2. Verify state is strictly APPROVED
         if task.status != TaskStatus.APPROVED:

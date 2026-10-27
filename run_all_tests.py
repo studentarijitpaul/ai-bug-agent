@@ -54,6 +54,7 @@ def execute():
         "tests.test_publisher",
         "tests.test_e2e_integration",
         "tests.test_security_audit",
+        "tests.test_offline_and_approval",
     ]
 
     total = 0

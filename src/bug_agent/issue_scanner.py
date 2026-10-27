@@ -4,7 +4,7 @@ import logging
 from typing import List, Optional
 
 from bug_agent.candidate_filter import CandidateFilter
-from bug_agent.config import AppConfig
+from bug_agent.config import ALLOWED_REPOSITORY, AppConfig, is_allowed_repository, normalize_repository
 from bug_agent.github_client import GitHubAPIError, GitHubClient, GitHubNotFoundError, GitHubRateLimitError
 from bug_agent.models import Issue, RepositoryScanResult
 from bug_agent.task_store import TaskStore
@@ -44,6 +44,16 @@ class IssueScanner:
         include_prs = include_prs if include_prs is not None else self.config.include_pull_requests
 
         logger.info(f"Scanning repository '{repository}' (max_issues={max_issues}, state={state})...")
+
+        # Validate repository URL and allow only pytorch/ignite before fetching issues or taking action
+        if not is_allowed_repository(repository):
+            logger.error("Repository '%s' is out of scope. Only https://github.com/%s is permitted.", repository, ALLOWED_REPOSITORY)
+            return RepositoryScanResult(
+                repository=repository,
+                issues=[],
+                success=False,
+                error_message=f"Repository not found or out of scope: '{repository}'. Only https://github.com/{ALLOWED_REPOSITORY} is permitted.",
+            )
 
         try:
             # 1. Verify access

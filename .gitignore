@@ -53,6 +53,8 @@ scan_results.json
 # Disposable workspaces generated during patch evaluation
 workspaces/
 reports/patches/
+.agent-state/
+state.json
 
 # Sensitive credentials & OAuth token files
 credentials.json

@@ -147,7 +147,11 @@ class AIProviderBase(abc.ABC):
 
 
 class MockAIProvider(AIProviderBase):
-    """Deterministic, offline mock AI provider for testing and safe dry runs."""
+    """Deterministic, fully offline rule-based provider for defect analysis and safe dry runs.
+    
+    Operates without paid AI services or external APIs, evaluating defects deterministically
+    via keyword and file evidence heuristics. Does not provide AI-powered analysis.
+    """
 
     def __init__(self, failure_mode: Optional[str] = None):
         """Args:
@@ -191,9 +195,12 @@ class MockAIProvider(AIProviderBase):
                     )
                 )
 
+        body_text = issue_body or ""
+        title_text = issue_title or ""
+
         # Detect suspected keywords
         is_suspected_bug = any(
-            kw in (issue_title + " " + issue_body).lower()
+            kw in (title_text + " " + body_text).lower()
             for kw in ["error", "exception", "fail", "bug", "traceback", "crash"]
         )
 
@@ -204,11 +211,11 @@ class MockAIProvider(AIProviderBase):
             task_id=task_id,
             repository=repository,
             issue_number=issue_number,
-            issue_summary=f"Analysis of: {issue_title}",
+            issue_summary=f"Analysis of: {title_text}",
             is_bug=is_suspected_bug,
             bug_classification=classification,
-            evidence_summary=f"Issue #{issue_number} reports unexpected behavior. Body length: {len(issue_body)} chars.",
-            suspected_root_cause=f"Potential logic mismatch in target component when handling input for {issue_title}.",
+            evidence_summary=f"Issue #{issue_number} reports unexpected behavior. Body length: {len(body_text)} chars.",
+            suspected_root_cause=f"Potential logic mismatch in target component when handling input for {title_text}.",
             relevant_files=relevant_files,
             reproduction_steps=[
                 f"1. Check out repository {repository}",

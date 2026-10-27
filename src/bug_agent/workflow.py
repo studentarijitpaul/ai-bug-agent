@@ -6,7 +6,7 @@ import re
 from typing import Dict, List, Optional
 
 from bug_agent.ai_analyzer import AIProviderBase, AIProviderError, AnalysisResult, MockAIProvider
-from bug_agent.config import AppConfig
+from bug_agent.config import ALLOWED_REPOSITORY, AppConfig, is_allowed_repository
 from bug_agent.github_client import GitHubClient
 from bug_agent.models import Task, TaskStatus
 from bug_agent.task_store import TaskStore
@@ -73,6 +73,13 @@ class DefectWorkflow:
         """
         if task.status != TaskStatus.DISCOVERED:
             logger.info(f"Skipping task {task.task_id}; status is {task.status.value} (expected DISCOVERED).")
+            return None
+
+        # Scope restriction: Analyze only pytorch/ignite
+        if not is_allowed_repository(task.repository):
+            logger.warning(
+                f"Skipping task {task.task_id}; repository '{task.repository}' is out of scope (only https://github.com/{ALLOWED_REPOSITORY} allowed)."
+            )
             return None
 
         logger.info(f"Analyzing task {task.task_id} using {self.ai_provider.name}...")
