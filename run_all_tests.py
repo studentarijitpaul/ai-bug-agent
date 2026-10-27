@@ -55,6 +55,7 @@ def execute():
         "tests.test_e2e_integration",
         "tests.test_security_audit",
         "tests.test_offline_and_approval",
+        "tests.test_harness_check",
     ]
 
     total = 0

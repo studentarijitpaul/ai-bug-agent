@@ -34,6 +34,7 @@ def test_check_repository_access_success(mock_urlopen):
 
 @patch("urllib.request.urlopen")
 def test_rate_limit_exceeded(mock_urlopen):
+    import io
     import urllib.error
     err_headers = {
         "x-ratelimit-remaining": "0",
@@ -44,7 +45,7 @@ def test_rate_limit_exceeded(mock_urlopen):
         code=403,
         msg="Forbidden",
         hdrs=err_headers,
-        fp=MagicMock(read=lambda: b'{"message": "API rate limit exceeded"}'),
+        fp=io.BytesIO(b'{"message": "API rate limit exceeded"}'),
     )
     mock_urlopen.side_effect = http_err
 
@@ -56,13 +57,14 @@ def test_rate_limit_exceeded(mock_urlopen):
 
 @patch("urllib.request.urlopen")
 def test_repository_not_found(mock_urlopen):
+    import io
     import urllib.error
     http_err = urllib.error.HTTPError(
         url="https://api.github.com/repos/nonexistent/repo",
         code=404,
         msg="Not Found",
         hdrs={},
-        fp=MagicMock(read=lambda: b'{"message": "Not Found"}'),
+        fp=io.BytesIO(b'{"message": "Not Found"}'),
     )
     mock_urlopen.side_effect = http_err
 

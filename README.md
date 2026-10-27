@@ -142,7 +142,7 @@ Or run using the self-contained standard library test runner:
 ```powershell
 python run_all_tests.py
 ```
-*Current test suite status: **98 passed across 14 test modules** with 0 failures.*
+*Current test suite status: **99 passed across 15 test modules** with 0 failures.*
 
 ---
 

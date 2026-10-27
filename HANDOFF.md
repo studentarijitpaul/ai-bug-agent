@@ -48,7 +48,7 @@
 ## Current Implementation Status
 - **Current Milestone**: Strict Repository Scope (`pytorch/ignite`), Offline Deterministic Analysis & Direct Gmail Issue Dispatch Complete.
 - **Active Repository Target**: `pytorch/ignite` (`https://github.com/pytorch/ignite`).
-- **Operating Status**: All development milestones + Scope Restrictions complete. **98 unit, integration, and security tests passing across 14 test suites (0 failures, 0 errors, 0 warnings)**.
+- **Operating Status**: All development milestones + Scope Restrictions complete. **99 unit, integration, and security tests passing across 15 test suites (0 failures, 0 errors, 0 warnings even with -W error)**.
 - **Deployment Gate Decision**: **READY FOR REVIEW & EXECUTION**. Unattended auto-publishing remains strictly disabled by design.
 - **AI / Paid Services Required**: **None**. Runs completely offline and free of charge.
 
@@ -69,10 +69,24 @@
   ```
 - Run local scan with mock Gmail human approval:
   ```powershell
-  python -m bug_agent.cli --config repos.json --limit 5 --analyze --request-approvals --mock-gmail
+  python -m bug_agent.cli --config repos.json --limit 5 --analyze --request-approvals --mock-gmail --email dev@example.com
   ```
 - Run in GitHub Actions:
   Trigger `.github/workflows/agent.yml` via `workflow_dispatch` on `main`. No `OPENAI_API_KEY` secret is needed. Configure `GMAIL_TOKEN_JSON`, `GMAIL_CREDENTIALS_JSON`, and `APPROVER_EMAIL` secrets only if live Gmail approvals are enabled.
+
+---
+
+## Codebase Execution & Reliability Validation (2026-10-27)
+- **Local Package Environment**: Re-installed active package in editable mode (`python -m pip install -e . --no-deps`) pointing to current repository `src/bug_agent`.
+- **Python 3.14 HTTP Resource Warning Fix**:
+  - `src/bug_agent/github_client.py`: Added explicit `e.close()` in `finally` block for `urllib.error.HTTPError` handling to eliminate implicit resource cleanup warnings.
+  - `tests/test_github_client.py`: Replaced `MagicMock` with `io.BytesIO` for mock `HTTPError` file payload `fp`.
+- **Harness Self-Test Suite Isolation**:
+  - `tests/test_harness_check.py`: Wrapped test execution in `test_harness_validation()` with isolated subdirectories per sub-check to avoid cross-test SQLite database pollution.
+  - `run_all_tests.py`: Added `tests.test_harness_check` to the suite list, bringing both pytest and `run_all_tests.py` to **99 tests passing across 15 test suites with 0 failures and 0 warnings**.
+- **CLI & Script Usability**:
+  - `generate_token.py`: Added clean file existence verification with actionable error message when `credentials.json` is missing.
+  - Verified full CLI lifecycle (`--config`, `--limit`, `--analyze`, `--request-approvals`, `--send-issue`, `--generate-patch`, `--run-tests`, `--request-publication`, `--publish --dry-run`).
 
 ---
 

@@ -139,12 +139,22 @@ def test_gmail_used_only_for_human_approval(tmp_path: Path):
 
 def test_gmail_oauth_fails_without_env_secrets(monkeypatch):
     """Verify production Gmail client requires environment secrets and fails closed."""
+    from unittest.mock import patch
+
     monkeypatch.delenv("GMAIL_TOKEN_JSON", raising=False)
     monkeypatch.delenv("GMAIL_CREDENTIALS_JSON", raising=False)
 
-    client = GmailClient()
-    with pytest.raises(GmailAuthError, match="GMAIL_TOKEN_JSON is required"):
-        client._get_service()
+    orig_isfile = os.path.isfile
+
+    def fake_isfile(path):
+        if str(path) in ("token.json", "credentials.json"):
+            return False
+        return orig_isfile(path)
+
+    with patch("os.path.isfile", side_effect=fake_isfile):
+        client = GmailClient(token_path=None)
+        with pytest.raises(GmailAuthError, match="GMAIL_TOKEN_JSON is required"):
+            client._get_service()
 
 
 def test_repository_scope_enforcement_in_scanner(monkeypatch):

@@ -112,8 +112,12 @@ class GmailClient(GmailClientBase):
     def __init__(
         self,
         scopes: Optional[List[str]] = None,
+        token_path: Optional[str] = "token.json",
+        credentials_path: Optional[str] = "credentials.json",
     ):
         self.scopes = scopes or GMAIL_SCOPES
+        self.token_path = token_path
+        self.credentials_path = credentials_path
         self.credentials_json = os.environ.get("GMAIL_CREDENTIALS_JSON")
         self.token_json = os.environ.get("GMAIL_TOKEN_JSON")
         self._service = None
@@ -133,23 +137,23 @@ class GmailClient(GmailClientBase):
             )
 
         token_str = self.token_json or os.environ.get("GMAIL_TOKEN_JSON")
-        if not token_str and os.path.isfile("token.json"):
+        if not token_str and self.token_path and os.path.isfile(self.token_path):
             try:
-                with open("token.json", "r", encoding="utf-8") as tf:
+                with open(self.token_path, "r", encoding="utf-8") as tf:
                     token_str = tf.read().strip()
             except Exception as e:
-                logger.debug("Failed reading local token.json: %s", e)
+                logger.debug("Failed reading local %s: %s", self.token_path, e)
 
         if not token_str:
             raise GmailAuthError("GMAIL_TOKEN_JSON is required; file-based and interactive OAuth are disabled.")
 
         creds_str = self.credentials_json or os.environ.get("GMAIL_CREDENTIALS_JSON")
-        if not creds_str and os.path.isfile("credentials.json"):
+        if not creds_str and self.credentials_path and os.path.isfile(self.credentials_path):
             try:
-                with open("credentials.json", "r", encoding="utf-8") as cf:
+                with open(self.credentials_path, "r", encoding="utf-8") as cf:
                     creds_str = cf.read().strip()
             except Exception as e:
-                logger.debug("Failed reading local credentials.json: %s", e)
+                logger.debug("Failed reading local %s: %s", self.credentials_path, e)
 
         try:
             token_info = json.loads(token_str)

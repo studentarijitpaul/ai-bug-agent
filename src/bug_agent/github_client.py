@@ -75,7 +75,10 @@ class GitHubClient:
                     return parsed, resp_headers
             except urllib.error.HTTPError as e:
                 resp_headers = {k.lower(): v for k, v in e.headers.items()} if e.headers else {}
-                body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+                try:
+                    body = e.read().decode("utf-8", errors="replace") if e.fp else ""
+                finally:
+                    e.close()
 
                 # Check rate limit
                 remaining = resp_headers.get("x-ratelimit-remaining")
