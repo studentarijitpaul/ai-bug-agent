@@ -66,10 +66,15 @@ jobs:
         shell: bash
         run: |
           mkdir -p .agent-state
+          GMAIL_MODE_ARGS=()
+          if [[ -z "${APPROVER_EMAIL:-}" || -z "${GMAIL_TOKEN_JSON:-}" ]]; then
+            echo "Gmail secrets not fully configured; using mock Gmail mode."
+            GMAIL_MODE_ARGS+=(--mock-gmail)
+          fi
           if [[ "$OPERATION" == "analyze_and_request" ]]; then
-            bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals
+            bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals "${GMAIL_MODE_ARGS[@]}"
           elif [[ "$OPERATION" == "check_replies" ]]; then
-            bug-agent --config repos.json --limit "$ISSUE_LIMIT" --ai-provider mock --check-approvals
+            bug-agent --config repos.json --limit "$ISSUE_LIMIT" --ai-provider mock --check-approvals "${GMAIL_MODE_ARGS[@]}"
           else
             echo "Unsupported operation." >&2
             exit 2
