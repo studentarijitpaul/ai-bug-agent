@@ -77,6 +77,10 @@
 ---
 
 ## Codebase Execution & Reliability Validation (2026-10-27)
+- **Scheduled Agent Execution Fix**:
+  - `.github/workflows/agent.yml`: Added a six-hour schedule, enabled the agent job for scheduled events, and made scheduled runs execute scan, offline analysis, live Gmail approval, and reply polling.
+  - Scheduled runs now fail clearly when `GMAIL_TOKEN_JSON` or `APPROVER_EMAIL` is missing instead of silently using an in-memory mock that cannot reach a phone.
+  - `src/bug_agent/cli.py`: Added `--resend-mock-approvals` so the first live run can migrate approval records created by earlier mock runs without resending normal live requests repeatedly.
 - **Local Package Environment**: Re-installed active package in editable mode (`python -m pip install -e . --no-deps`) pointing to current repository `src/bug_agent`.
 - **Python 3.14 HTTP Resource Warning Fix**:
   - `src/bug_agent/github_client.py`: Added explicit `e.close()` in `finally` block for `urllib.error.HTTPError` handling to eliminate implicit resource cleanup warnings.

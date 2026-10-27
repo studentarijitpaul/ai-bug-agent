@@ -13,6 +13,7 @@ name: CI and Bug Agent
         type: choice
         options:
           - analyze_and_request
+          - scheduled_run
           - analyze_only
           - check_replies
           - status
@@ -42,6 +43,8 @@ name: CI and Bug Agent
         required: false
         type: boolean
         default: false
+  schedule:
+    - cron: "0 */6 * * *"
 
 permissions:
   contents: read
@@ -76,8 +79,8 @@ jobs:
         run: python run_all_tests.py
 
   run-agent:
-    name: Run Bug Agent (manual)
-    if: github.event_name == 'workflow_dispatch'
+    name: Run Bug Agent
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     concurrency:
@@ -116,20 +119,28 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           DATABASE_PATH: .agent-state/tasks.db
           STATE_JSON_PATH: .agent-state/state.json
-          OPERATION: ${{ inputs.operation }}
-          ISSUE_LIMIT: ${{ inputs.issue_limit }}
+          OPERATION: ${{ inputs.operation || 'scheduled_run' }}
+          ISSUE_LIMIT: ${{ inputs.issue_limit || '30' }}
           TARGET_ID: ${{ inputs.target_id }}
           RECIPIENT_EMAIL: ${{ inputs.recipient_email }}
           FORCE_MOCK_GMAIL: ${{ inputs.mock_gmail }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
           mkdir -p .agent-state reports/patches
           GMAIL_ARGS=()
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
+            OPERATION="scheduled_run"
+            ISSUE_LIMIT="${ISSUE_LIMIT:-30}"
+            FORCE_MOCK_GMAIL="false"
+          fi
           EFFECTIVE_EMAIL="${RECIPIENT_EMAIL:-$APPROVER_EMAIL}"
-          if [[ "$FORCE_MOCK_GMAIL" == "true" || -z "${GMAIL_TOKEN_JSON:-}" || -z "${EFFECTIVE_EMAIL:-}" ]]; then
-            echo "[INFO] Live Gmail secrets not fully configured or mock requested; using mock Gmail mode."
+          if [[ "$FORCE_MOCK_GMAIL" == "true" ]]; then
             GMAIL_ARGS+=(--mock-gmail)
             if [[ -z "${EFFECTIVE_EMAIL:-}" ]]; then EFFECTIVE_EMAIL="approver@example.com"; fi
+          elif [[ -z "${GMAIL_TOKEN_JSON:-}" || -z "${EFFECTIVE_EMAIL:-}" ]]; then
+            echo "::error::Live Gmail is required for scheduled/approval runs. Configure GMAIL_TOKEN_JSON and APPROVER_EMAIL repository secrets, or explicitly select mock Gmail for a manual test."
+            exit 1
           fi
           if [[ -n "${EFFECTIVE_EMAIL:-}" ]]; then GMAIL_ARGS+=(--email "$EFFECTIVE_EMAIL"); fi
           echo "============================================================"
@@ -142,6 +153,7 @@ jobs:
           echo "============================================================"
           case "$OPERATION" in
             analyze_and_request) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals "${GMAIL_ARGS[@]}" ;;
+            scheduled_run) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals --resend-mock-approvals --check-approvals "${GMAIL_ARGS[@]}" ;;
             analyze_only) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock ;;
             check_replies) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --ai-provider mock --check-approvals "${GMAIL_ARGS[@]}" ;;
             status) bug-agent --status ;;

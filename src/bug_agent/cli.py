@@ -189,6 +189,11 @@ def main(argv: List[str] = None) -> int:
         help="Send Gmail approval requests for analyzed issues awaiting decision",
     )
     parser.add_argument(
+        "--resend-mock-approvals",
+        action="store_true",
+        help="Resend only approval requests previously recorded by MockGmailClient",
+    )
+    parser.add_argument(
         "--send-issue",
         type=str,
         metavar="TASK_OR_ISSUE",
@@ -438,6 +443,20 @@ def main(argv: List[str] = None) -> int:
                 else:
                     print(f"  [FAILED] Could not send request for {t.task_id}")
                     approval_stage_failed = True
+            if args.resend_mock_approvals:
+                stale_mock_tasks = []
+                for t in task_store.list_tasks(status=TaskStatus.AWAITING_APPROVAL):
+                    req = task_store.get_approval_request(t.task_id)
+                    if req and (req.message_id or "").startswith("mock-"):
+                        stale_mock_tasks.append(t)
+                print(f"Mock approval requests eligible for live resend: {len(stale_mock_tasks)}")
+                for t in stale_mock_tasks:
+                    req = approval_mgr.request_approval_for_task(t, force_resend=True)
+                    if req:
+                        print(f"  [RESENT] Approval request sent for {t.task_id}")
+                    else:
+                        print(f"  [FAILED] Could not resend request for {t.task_id}")
+                        approval_stage_failed = True
             print("=" * 60 + "\n")
 
         if args.check_approvals and gmail_ready:
