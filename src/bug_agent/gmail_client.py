@@ -127,15 +127,6 @@ class GmailClient(GmailClientBase):
         if self._service is not None:
             return self._service
 
-        try:
-            from google.auth.transport.requests import Request
-            from google.oauth2.credentials import Credentials
-            from googleapiclient.discovery import build
-        except ImportError:
-            raise GmailError(
-                "Missing Google client dependencies. Install with: pip install google-api-python-client google-auth-oauthlib"
-            )
-
         token_str = self.token_json or os.environ.get("GMAIL_TOKEN_JSON")
         if not token_str and self.token_path and os.path.isfile(self.token_path):
             try:
@@ -146,6 +137,15 @@ class GmailClient(GmailClientBase):
 
         if not token_str:
             raise GmailAuthError("GMAIL_TOKEN_JSON is required; file-based and interactive OAuth are disabled.")
+
+        try:
+            from google.auth.transport.requests import Request
+            from google.oauth2.credentials import Credentials
+            from googleapiclient.discovery import build
+        except ImportError:
+            raise GmailError(
+                "Missing Google client dependencies. Install with: pip install google-api-python-client google-auth-oauthlib"
+            )
 
         creds_str = self.credentials_json or os.environ.get("GMAIL_CREDENTIALS_JSON")
         if not creds_str and self.credentials_path and os.path.isfile(self.credentials_path):
