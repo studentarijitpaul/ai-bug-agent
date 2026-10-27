@@ -1,6 +1,10 @@
-name: Bug Agent Workflow (Offline Analysis, Approvals & Sandboxing)
+name: CI and Bug Agent
 
 "on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
     inputs:
       operation:
@@ -44,27 +48,51 @@ permissions:
   issues: read
   actions: read
 
-concurrency:
-  group: bug-agent-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
+  test:
+    name: Test (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    if: github.event_name == 'push' || github.event_name == 'pull_request'
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.10", "3.11", "3.12"]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: Run pytest test suite
+        run: python -m pytest -v
+      - name: Run standalone suite runner
+        run: python run_all_tests.py
+
   run-agent:
+    name: Run Bug Agent (manual)
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-
+    concurrency:
+      group: bug-agent-${{ github.ref }}
+      cancel-in-progress: false
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-
       - name: Restore persistent task database & state cache
         uses: actions/cache@v4
         with:
@@ -75,12 +103,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bug-agent-${{ github.ref_name }}-
             ${{ runner.os }}-bug-agent-
-
       - name: Install bug agent and dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all]"
-
       - name: Execute Bug Agent Operation
         id: execute-agent
         env:
@@ -98,23 +124,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p .agent-state reports/patches
-
-          # Configure Gmail parameters
           GMAIL_ARGS=()
           EFFECTIVE_EMAIL="${RECIPIENT_EMAIL:-$APPROVER_EMAIL}"
-
           if [[ "$FORCE_MOCK_GMAIL" == "true" || -z "${GMAIL_TOKEN_JSON:-}" || -z "${EFFECTIVE_EMAIL:-}" ]]; then
             echo "[INFO] Live Gmail secrets not fully configured or mock requested; using mock Gmail mode."
             GMAIL_ARGS+=(--mock-gmail)
-            if [[ -z "${EFFECTIVE_EMAIL:-}" ]]; then
-              EFFECTIVE_EMAIL="approver@example.com"
-            fi
+            if [[ -z "${EFFECTIVE_EMAIL:-}" ]]; then EFFECTIVE_EMAIL="approver@example.com"; fi
           fi
-
-          if [[ -n "${EFFECTIVE_EMAIL:-}" ]]; then
-            GMAIL_ARGS+=(--email "$EFFECTIVE_EMAIL")
-          fi
-
+          if [[ -n "${EFFECTIVE_EMAIL:-}" ]]; then GMAIL_ARGS+=(--email "$EFFECTIVE_EMAIL"); fi
           echo "============================================================"
           echo " Starting Bug Agent Run"
           echo " Operation:    $OPERATION"
@@ -123,50 +140,23 @@ jobs:
           echo " Approver:     $EFFECTIVE_EMAIL"
           echo " Gmail Mode:   $(if [[ "${GMAIL_ARGS[*]}" == *"--mock-gmail"* ]]; then echo "MOCK"; else echo "LIVE OAUTH"; fi)"
           echo "============================================================"
-
           case "$OPERATION" in
-            analyze_and_request)
-              bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals "${GMAIL_ARGS[@]}"
-              ;;
-            analyze_only)
-              bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock
-              ;;
-            check_replies)
-              bug-agent --config repos.json --limit "$ISSUE_LIMIT" --ai-provider mock --check-approvals "${GMAIL_ARGS[@]}"
-              ;;
-            status)
-              bug-agent --status
-              ;;
+            analyze_and_request) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals "${GMAIL_ARGS[@]}" ;;
+            analyze_only) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock ;;
+            check_replies) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --ai-provider mock --check-approvals "${GMAIL_ARGS[@]}" ;;
+            status) bug-agent --status ;;
             send_issue)
-              if [[ -z "$TARGET_ID" ]]; then
-                echo "Error: target_id is required for send_issue." >&2
-                exit 1
-              fi
-              bug-agent --send-issue "$TARGET_ID" "${GMAIL_ARGS[@]}"
-              ;;
+              if [[ -z "$TARGET_ID" ]]; then echo "Error: target_id is required for send_issue." >&2; exit 1; fi
+              bug-agent --send-issue "$TARGET_ID" "${GMAIL_ARGS[@]}" ;;
             generate_patch)
-              if [[ -z "$TARGET_ID" ]]; then
-                echo "Error: target_id is required for generate_patch." >&2
-                exit 1
-              fi
-              bug-agent --generate-patch "$TARGET_ID"
-              ;;
+              if [[ -z "$TARGET_ID" ]]; then echo "Error: target_id is required for generate_patch." >&2; exit 1; fi
+              bug-agent --generate-patch "$TARGET_ID" ;;
             run_tests)
-              if [[ -z "$TARGET_ID" ]]; then
-                echo "Error: target_id is required for run_tests." >&2
-                exit 1
-              fi
-              bug-agent --run-tests "$TARGET_ID" --mock-sandbox
-              ;;
-            request_publication)
-              bug-agent --request-publication "${GMAIL_ARGS[@]}"
-              ;;
-            *)
-              echo "Error: Unsupported operation '$OPERATION'." >&2
-              exit 2
-              ;;
+              if [[ -z "$TARGET_ID" ]]; then echo "Error: target_id is required for run_tests." >&2; exit 1; fi
+              bug-agent --run-tests "$TARGET_ID" --mock-sandbox ;;
+            request_publication) bug-agent --request-publication "${GMAIL_ARGS[@]}" ;;
+            *) echo "Error: Unsupported operation '$OPERATION'." >&2; exit 2 ;;
           esac
-
       - name: Generate GitHub Actions Step Summary
         if: always()
         env:
@@ -190,13 +180,11 @@ jobs:
           ### 📋 Database Task & Approval Status
           ```text
           EOF
-
           if [[ -f ".agent-state/tasks.db" ]]; then
             bug-agent --db-path .agent-state/tasks.db --status >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "Could not read status" >> "$GITHUB_STEP_SUMMARY"
           else
             echo "No database file initialized yet." >> "$GITHUB_STEP_SUMMARY"
           fi
-
           cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
           ```
 
@@ -205,7 +193,6 @@ jobs:
           > - Scope is strictly restricted to `pytorch/ignite`.
           > - Unattended pull request publication is disabled by design.
           EOF
-
       - name: Upload Task Database and Generated Artifacts
         if: always()
         uses: actions/upload-artifact@v4
