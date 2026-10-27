@@ -81,6 +81,9 @@
 - **Python 3.14 HTTP Resource Warning Fix**:
   - `src/bug_agent/github_client.py`: Added explicit `e.close()` in `finally` block for `urllib.error.HTTPError` handling to eliminate implicit resource cleanup warnings.
   - `tests/test_github_client.py`: Replaced `MagicMock` with `io.BytesIO` for mock `HTTPError` file payload `fp`.
+- **Local `token.json` Test Isolation**:
+  - `src/bug_agent/gmail_client.py`: Added `token_path` and `credentials_path` parameters to `GmailClient.__init__` to allow tests and callers to explicitly control or bypass local token file lookups.
+  - `tests/test_offline_and_approval.py`: Isolated `test_gmail_oauth_fails_without_env_secrets` from real `token.json` and `credentials.json` files on disk, ensuring tests always verify zero-credential closed failure even when developers have generated local credentials.
 - **Harness Self-Test Suite Isolation**:
   - `tests/test_harness_check.py`: Wrapped test execution in `test_harness_validation()` with isolated subdirectories per sub-check to avoid cross-test SQLite database pollution.
   - `run_all_tests.py`: Added `tests.test_harness_check` to the suite list, bringing both pytest and `run_all_tests.py` to **99 tests passing across 15 test suites with 0 failures and 0 warnings**.
