@@ -71,6 +71,9 @@ jobs:
             echo "Gmail secrets not fully configured; using mock Gmail mode."
             GMAIL_MODE_ARGS+=(--mock-gmail)
           fi
+          if [[ -z "${APPROVER_EMAIL:-}" ]]; then
+            APPROVER_EMAIL="approver@example.com"
+          fi
           if [[ "$OPERATION" == "analyze_and_request" ]]; then
             bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals "${GMAIL_MODE_ARGS[@]}"
           elif [[ "$OPERATION" == "check_replies" ]]; then
