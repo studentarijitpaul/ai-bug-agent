@@ -245,7 +245,7 @@ python -m bug_agent.cli --publish TASK-owner-repo-123 --dry-run
 - **Zero Paid AI Services / No OpenAI API Key**: Bug defect analysis is fully offline, local, and deterministic. No OpenAI API key or paid AI service is required or configured.
 - **Rule-Based Heuristic Analysis**: Defect analysis uses deterministic keyword matching and repository file context inspection. It does not provide or claim to provide AI-powered analysis.
 - **Provider Removal**: The OpenAI/Codex API provider (`codex_adapter.py`) has been removed from the repository. The CLI accepts `--ai-provider mock` for offline rule-based execution.
-- **Hosted GitHub Actions**: The manually triggered `.github/workflows/agent.yml` workflow runs offline defect analysis without any OpenAI secret. It uses Gmail API only for human approval workflows when selected.
+- **Hosted GitHub Actions**: `.github/workflows/agent.yml` runs every six hours, scans and analyzes issues offline, sends live Gmail approval requests, and polls replies. Manual dispatch remains available for one-off operations; mock Gmail is only used when explicitly selected for testing.
 - **Repository Secrets**: GitHub Actions requires only `GMAIL_TOKEN_JSON`, `GMAIL_CREDENTIALS_JSON`, and `APPROVER_EMAIL` if human email approval is enabled; no AI keys or external LLM service credentials are required. `GITHUB_TOKEN` is supplied automatically by GitHub Actions. The workflow caches `.agent-state/tasks.db` and non-secret `state.json` between runs.
 
 ---
