@@ -1,3 +1,4 @@
+
 name: CI and Bug Agent
 
 "on":
@@ -29,17 +30,17 @@ name: CI and Bug Agent
         type: choice
         options: ["1", "5", "10", "20", "30"]
       target_id:
-        description: "Target Task ID or Issue Number (for send_issue, generate_patch, run_tests)"
+        description: "Target Task ID or Issue Number"
         required: false
         type: string
         default: ""
       recipient_email:
-        description: "Optional recipient email override (overrides APPROVER_EMAIL secret)"
+        description: "Optional recipient override; defaults to APPROVER_EMAIL"
         required: false
         type: string
         default: ""
       mock_gmail:
-        description: "Force mock Gmail mode (simulated queue, no Google OAuth secrets needed)"
+        description: "Use simulated Gmail for a manual test only"
         required: false
         type: boolean
         default: false
@@ -61,20 +62,25 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
         python-version: ["3.10", "3.11", "3.12"]
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+
       - name: Set up Python ${{ matrix.python-version }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
           cache: pip
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
+
       - name: Run pytest test suite
         run: python -m pytest -v
+
       - name: Run standalone suite runner
         run: python run_all_tests.py
 
@@ -83,20 +89,24 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+
     concurrency:
       group: bug-agent-${{ github.ref }}
       cancel-in-progress: false
+
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
         with:
           persist-credentials: false
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
-      - name: Restore persistent task database & state cache
+
+      - name: Restore persistent task database and state cache
         uses: actions/cache@v4
         with:
           path: |
@@ -106,10 +116,67 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-bug-agent-${{ github.ref_name }}-
             ${{ runner.os }}-bug-agent-
+
       - name: Install bug agent and dependencies
         run: |
           python -m pip install --upgrade pip
           python -m pip install -e ".[all]"
+
+      - name: Validate Gmail configuration
+        shell: bash
+        env:
+          GMAIL_TOKEN_JSON: ${{ secrets.GMAIL_TOKEN_JSON }}
+          APPROVER_EMAIL: ${{ secrets.APPROVER_EMAIL }}
+          RECIPIENT_EMAIL: ${{ inputs.recipient_email }}
+          FORCE_MOCK_GMAIL: ${{ inputs.mock_gmail }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          OPERATION: ${{ inputs.operation || 'scheduled_run' }}
+        run: |
+          set -euo pipefail
+
+          # Scheduled executions must use real Gmail.
+          if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
+            FORCE_MOCK_GMAIL="false"
+            OPERATION="scheduled_run"
+          fi
+
+          EFFECTIVE_EMAIL="${RECIPIENT_EMAIL:-$APPROVER_EMAIL}"
+
+          # Mock mode is an explicit option for manual workflow runs.
+          if [[ "$FORCE_MOCK_GMAIL" == "true" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
+              echo "::error::Mock Gmail is allowed only for manual workflow runs."
+              exit 1
+            fi
+
+            echo "Gmail configuration: MOCK mode"
+            echo "Operation: $OPERATION"
+            exit 0
+          fi
+
+          # Live mode requires both secrets and an effective recipient.
+          if [[ -z "${GMAIL_TOKEN_JSON:-}" ]]; then
+            echo "::error::Missing GMAIL_TOKEN_JSON repository secret."
+            exit 1
+          fi
+
+          if [[ -z "${EFFECTIVE_EMAIL:-}" ]]; then
+            echo "::error::Missing APPROVER_EMAIL secret or recipient_email input."
+            exit 1
+          fi
+
+          # Validate JSON without printing its sensitive contents.
+          if ! printf '%s' "$GMAIL_TOKEN_JSON" | python -c \
+            'import json,sys; d=json.load(sys.stdin); assert isinstance(d,dict) and ("token" in d or "refresh_token" in d)' \
+            >/dev/null 2>&1; then
+            echo "::error::GMAIL_TOKEN_JSON is not valid OAuth token JSON."
+            exit 1
+          fi
+
+          echo "Gmail configuration: LIVE OAuth"
+          echo "Operation: $OPERATION"
+          echo "Gmail secrets are present and the token JSON is valid."
+
       - name: Execute Bug Agent Operation
         id: execute-agent
         env:
@@ -127,84 +194,159 @@ jobs:
           GITHUB_EVENT_NAME: ${{ github.event_name }}
         shell: bash
         run: |
+          set -euo pipefail
+
           mkdir -p .agent-state reports/patches
+
           GMAIL_ARGS=()
+
+          # Never allow scheduled runs to use mock Gmail.
           if [[ "$GITHUB_EVENT_NAME" == "schedule" ]]; then
             OPERATION="scheduled_run"
             ISSUE_LIMIT="${ISSUE_LIMIT:-30}"
             FORCE_MOCK_GMAIL="false"
           fi
+
           EFFECTIVE_EMAIL="${RECIPIENT_EMAIL:-$APPROVER_EMAIL}"
+
           if [[ "$FORCE_MOCK_GMAIL" == "true" ]]; then
+            if [[ "$GITHUB_EVENT_NAME" != "workflow_dispatch" ]]; then
+              echo "::error::Mock Gmail is allowed only for manual workflow runs."
+              exit 1
+            fi
+
             GMAIL_ARGS+=(--mock-gmail)
-            if [[ -z "${EFFECTIVE_EMAIL:-}" ]]; then EFFECTIVE_EMAIL="approver@example.com"; fi
-          elif [[ -z "${GMAIL_TOKEN_JSON:-}" || -z "${EFFECTIVE_EMAIL:-}" ]]; then
-            echo "::error::Live Gmail is required for scheduled/approval runs. Configure GMAIL_TOKEN_JSON and APPROVER_EMAIL repository secrets, or explicitly select mock Gmail for a manual test."
-            exit 1
+
+            if [[ -z "${EFFECTIVE_EMAIL:-}" ]]; then
+              EFFECTIVE_EMAIL="approver@example.com"
+            fi
+          else
+            if [[ -z "${GMAIL_TOKEN_JSON:-}" ]]; then
+              echo "::error::GMAIL_TOKEN_JSON is missing."
+              exit 1
+            fi
+
+            if [[ -z "${EFFECTIVE_EMAIL:-}" ]]; then
+              echo "::error::APPROVER_EMAIL or recipient_email is required."
+              exit 1
+            fi
           fi
-          if [[ -n "${EFFECTIVE_EMAIL:-}" ]]; then GMAIL_ARGS+=(--email "$EFFECTIVE_EMAIL"); fi
+
+          if [[ -n "${EFFECTIVE_EMAIL:-}" ]]; then
+            GMAIL_ARGS+=(--email "$EFFECTIVE_EMAIL")
+          fi
+
+          if [[ "${GMAIL_ARGS[*]}" == *"--mock-gmail"* ]]; then
+            GMAIL_MODE="MOCK"
+          else
+            GMAIL_MODE="LIVE OAUTH"
+          fi
+
           echo "============================================================"
-          echo " Starting Bug Agent Run"
-          echo " Operation:    $OPERATION"
-          echo " Issue Limit:  $ISSUE_LIMIT"
-          echo " Target ID:    ${TARGET_ID:-N/A}"
-          echo " Approver:     $EFFECTIVE_EMAIL"
-          echo " Gmail Mode:   $(if [[ "${GMAIL_ARGS[*]}" == *"--mock-gmail"* ]]; then echo "MOCK"; else echo "LIVE OAUTH"; fi)"
+          echo "Starting Bug Agent Run"
+          echo "Operation:    $OPERATION"
+          echo "Issue Limit:  $ISSUE_LIMIT"
+          echo "Target ID:    ${TARGET_ID:-N/A}"
+          echo "Gmail Mode:   $GMAIL_MODE"
           echo "============================================================"
+
           case "$OPERATION" in
-            analyze_and_request) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals "${GMAIL_ARGS[@]}" ;;
-            scheduled_run) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock --request-approvals --resend-mock-approvals --check-approvals "${GMAIL_ARGS[@]}" ;;
-            analyze_only) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --analyze --ai-provider mock ;;
-            check_replies) bug-agent --config repos.json --limit "$ISSUE_LIMIT" --ai-provider mock --check-approvals "${GMAIL_ARGS[@]}" ;;
-            status) bug-agent --status ;;
+            analyze_and_request)
+              bug-agent --config repos.json --limit "$ISSUE_LIMIT" \
+                --analyze --ai-provider mock --request-approvals \
+                "${GMAIL_ARGS[@]}"
+              ;;
+
+            scheduled_run)
+              bug-agent --config repos.json --limit "$ISSUE_LIMIT" \
+                --analyze --ai-provider mock --request-approvals \
+                --resend-mock-approvals --check-approvals \
+                "${GMAIL_ARGS[@]}"
+              ;;
+
+            analyze_only)
+              bug-agent --config repos.json --limit "$ISSUE_LIMIT" \
+                --analyze --ai-provider mock
+              ;;
+
+            check_replies)
+              bug-agent --config repos.json --limit "$ISSUE_LIMIT" \
+                --ai-provider mock --check-approvals \
+                "${GMAIL_ARGS[@]}"
+              ;;
+
+            status)
+              bug-agent --status
+              ;;
+
             send_issue)
-              if [[ -z "$TARGET_ID" ]]; then echo "Error: target_id is required for send_issue." >&2; exit 1; fi
-              bug-agent --send-issue "$TARGET_ID" "${GMAIL_ARGS[@]}" ;;
+              if [[ -z "$TARGET_ID" ]]; then
+                echo "::error::target_id is required for send_issue."
+                exit 1
+              fi
+              bug-agent --send-issue "$TARGET_ID" "${GMAIL_ARGS[@]}"
+              ;;
+
             generate_patch)
-              if [[ -z "$TARGET_ID" ]]; then echo "Error: target_id is required for generate_patch." >&2; exit 1; fi
-              bug-agent --generate-patch "$TARGET_ID" ;;
+              if [[ -z "$TARGET_ID" ]]; then
+                echo "::error::target_id is required for generate_patch."
+                exit 1
+              fi
+              bug-agent --generate-patch "$TARGET_ID"
+              ;;
+
             run_tests)
-              if [[ -z "$TARGET_ID" ]]; then echo "Error: target_id is required for run_tests." >&2; exit 1; fi
-              bug-agent --run-tests "$TARGET_ID" --mock-sandbox ;;
-            request_publication) bug-agent --request-publication "${GMAIL_ARGS[@]}" ;;
-            *) echo "Error: Unsupported operation '$OPERATION'." >&2; exit 2 ;;
+              if [[ -z "$TARGET_ID" ]]; then
+                echo "::error::target_id is required for run_tests."
+                exit 1
+              fi
+              bug-agent --run-tests "$TARGET_ID" --mock-sandbox
+              ;;
+
+            request_publication)
+              bug-agent --request-publication "${GMAIL_ARGS[@]}"
+              ;;
+
+            *)
+              echo "::error::Unsupported operation '$OPERATION'."
+              exit 2
+              ;;
           esac
+
       - name: Generate GitHub Actions Step Summary
         if: always()
         env:
-          OPERATION: ${{ inputs.operation }}
-          ISSUE_LIMIT: ${{ inputs.issue_limit }}
+          OPERATION: ${{ inputs.operation || 'scheduled_run' }}
+          ISSUE_LIMIT: ${{ inputs.issue_limit || '30' }}
           TARGET_ID: ${{ inputs.target_id }}
-          DATABASE_PATH: .agent-state/tasks.db
         shell: bash
         run: |
-          cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
-          ## 🤖 AI Bug Agent Execution Summary
+          {
+            echo "## AI Bug Agent Execution Summary"
+            echo ""
+            echo "| Setting | Value |"
+            echo "|---|---|"
+            echo "| Operation | $OPERATION |"
+            echo "| Issue Limit | $ISSUE_LIMIT |"
+            echo "| Target ID | ${TARGET_ID:-None specified} |"
+            echo "| Scope | pytorch/ignite |"
+            echo "| Analysis Provider | mock |"
+            echo ""
+            echo "### Task and Approval Status"
+            echo '```text'
 
-          | Setting | Value |
-          |---|---|
-          | **Operation** | `${{ inputs.operation }}` |
-          | **Issue Limit** | `${{ inputs.issue_limit }}` |
-          | **Target ID** | `${{ inputs.target_id || 'None specified' }}` |
-          | **Scope** | `https://github.com/pytorch/ignite` (Locked) |
-          | **Analysis Provider** | `mock` (Offline Deterministic Heuristics) |
+            if [[ -f ".agent-state/tasks.db" ]]; then
+              bug-agent --db-path .agent-state/tasks.db --status 2>&1 || true
+            else
+              echo "No database file initialized yet."
+            fi
 
-          ### 📋 Database Task & Approval Status
-          ```text
-          EOF
-          if [[ -f ".agent-state/tasks.db" ]]; then
-            bug-agent --db-path .agent-state/tasks.db --status >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "Could not read status" >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "No database file initialized yet." >> "$GITHUB_STEP_SUMMARY"
-          fi
-          cat << 'EOF' >> "$GITHUB_STEP_SUMMARY"
-          ```
+            echo '```'
+            echo ""
+            echo "> Security: analysis uses deterministic mock heuristics."
+            echo "> Unattended pull request publication remains disabled by design."
+          } >> "$GITHUB_STEP_SUMMARY"
 
-          > **Security Policy**:
-          > - Analysis is strictly deterministic and performed offline. No external paid AI keys are used.
-          > - Scope is strictly restricted to `pytorch/ignite`.
-          > - Unattended pull request publication is disabled by design.
-          EOF
       - name: Upload Task Database and Generated Artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -213,4 +355,5 @@ jobs:
           path: |
             .agent-state/
             reports/
+          if-no-files-found: warn
           retention-days: 14
