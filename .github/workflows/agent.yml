@@ -242,6 +242,12 @@ jobs:
             GMAIL_MODE="LIVE OAUTH"
           fi
 
+          # Only a live mailbox can replace approval records created by mock runs.
+          RESEND_MOCK_ARGS=()
+          if [[ "$GMAIL_MODE" == "LIVE OAUTH" ]]; then
+            RESEND_MOCK_ARGS+=(--resend-mock-approvals)
+          fi
+
           echo "============================================================"
           echo "Starting Bug Agent Run"
           echo "Operation:    $OPERATION"
@@ -254,7 +260,7 @@ jobs:
             analyze_and_request)
               bug-agent --config repos.json --limit "$ISSUE_LIMIT" \
                 --analyze --ai-provider mock --request-approvals \
-                "${GMAIL_ARGS[@]}"
+                "${RESEND_MOCK_ARGS[@]}" "${GMAIL_ARGS[@]}"
               ;;
 
             scheduled_run)
