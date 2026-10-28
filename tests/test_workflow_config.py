@@ -14,7 +14,7 @@ def test_manual_live_approval_run_resends_pending_mock_requests():
         workflow,
     )
     analyze_operation = re.search(
-        r'(?ms)^[ ]{12}analyze_and_request\)\s*(.*?)^[ ]{12};;',
+        r'(?ms)^[ ]{12}analyze_and_request\)(.*?)^[ ]{14};;',
         workflow,
     )
 
