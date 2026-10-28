@@ -19,5 +19,6 @@ def test_manual_live_approval_run_resends_pending_mock_requests():
     )
 
     assert live_resend is not None
+    assert '("refresh_token" in d)' in workflow
     assert analyze_operation is not None
     assert '"${RESEND_MOCK_ARGS[@]}"' in analyze_operation.group(1)
